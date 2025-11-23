@@ -7,16 +7,16 @@ import {
   resetGame,
   checkCollision,
 } from "./utils";
-import type { GameState } from "./types";
+import type { GameState } from "./utils";
 
 interface FlappyProps {
   onExit: () => void;
-  onGameOver?: (sessionScore: number) => void;
+  onGameOver?: (score: number) => void;
 }
 
-const GRAVITY = 0.8;     // падає швидше, динамічніше
-const JUMP_FORCE = -10.5; // сильніший стрибок
-const PIPE_SPEED = 3.6;   // труби рухаються швидше
+const GRAVITY = 0.8;
+const JUMP_FORCE = -10.5;
+const PIPE_SPEED = 3.5;
 
 const BEST_KEY = "flappyBestScore";
 
@@ -25,114 +25,71 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
   const animationRef = useRef<number | null>(null);
   const gameRef = useRef<GameState>(createInitialState());
 
-  // офскрін-канвас для статичного фону
-  const backgroundCanvasRef = useRef<HTMLCanvasElement | null>(null);
-
   const [score, setScore] = useState(0);
   const [bestScore, setBestScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
 
-  // завантажуємо bestScore з localStorage
+  // Завантажуємо найкращий результат з localStorage
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = window.localStorage.getItem(BEST_KEY);
-        if (saved) {
-          const val = Number(saved);
-          if (!Number.isNaN(val) && val > 0) {
-            setBestScore(val);
-            gameRef.current.bestScore = val;
-          }
+    try {
+      const saved = localStorage.getItem(BEST_KEY);
+      if (saved) {
+        const val = Number(saved);
+        if (!Number.isNaN(val)) {
+          setBestScore(val);
+          gameRef.current.bestScore = val;
         }
-      } catch {
-        // якщо localStorage недоступний – пропускаємо
       }
+    } catch {
+      // якщо localStorage недоступний — пропускаємо
     }
   }, []);
 
-  // малюємо фон один раз на офскрін-канвасі
-  useEffect(() => {
-    const bg = document.createElement("canvas");
-    bg.width = CANVAS_WIDTH;
-    bg.height = CANVAS_HEIGHT;
-    const bgCtx = bg.getContext("2d");
-    if (bgCtx) {
-      const gradient = bgCtx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-      gradient.addColorStop(0, "#060821");
-      gradient.addColorStop(1, "#020308");
-      bgCtx.fillStyle = gradient;
-      bgCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-      // зорі
-      bgCtx.fillStyle = "rgba(255,255,255,0.13)";
-      for (let i = 0; i < 25; i++) {
-        const x = (i * 57) % CANVAS_WIDTH;
-        const y = (i * 103) % CANVAS_HEIGHT;
-        bgCtx.fillRect(x, y, 2, 2);
-      }
-    }
-    backgroundCanvasRef.current = bg;
-  }, []);
-
-  // TAP по canvas: старт / стрибок / рестарт
   const handleTap = () => {
     const game = gameRef.current;
 
-    // якщо гра закінчена – повний restart + миттєвий старт
+    // Якщо гра закінчена — тап = повний рестарт
     if (game.gameOver) {
-      const restarted = resetGame(game); // новий state, переносить bestScore
+      const restarted = resetGame(game);
       restarted.isRunning = true;
       restarted.bird.velocity = JUMP_FORCE;
-
       gameRef.current = restarted;
 
-      setScore(restarted.score);
-      setBestScore(restarted.bestScore);
+      setScore(0);
       setGameOver(false);
-      setIsRunning(true);
       return;
     }
 
-    // якщо ще не стартували – запускаємо гру
+    // Перший старт
     if (!game.isRunning) {
       game.isRunning = true;
-      setIsRunning(true);
     }
 
-    // стрибок
+    // Стрибок
     game.bird.velocity = JUMP_FORCE;
   };
 
   const endGame = () => {
     const game = gameRef.current;
-
-    if (game.gameOver) return; // захист від повторного виклику
+    if (game.gameOver) return;
 
     game.gameOver = true;
     game.isRunning = false;
-
     setGameOver(true);
-    setIsRunning(false);
 
-    if (onGameOver) {
-      onGameOver(game.score);
-    }
+    if (onGameOver) onGameOver(game.score);
   };
 
   const drawScene = (ctx: CanvasRenderingContext2D, game: GameState) => {
-    // труби
-    for (const pipe of game.pipes) {
-      const pipeGradient = ctx.createLinearGradient(
-        pipe.x,
-        0,
-        pipe.x + pipe.width,
-        0
-      );
-      pipeGradient.addColorStop(0, "#02ff7b");
-      pipeGradient.addColorStop(1, "#00b24f");
+    ctx.imageSmoothingEnabled = false;
 
-      ctx.fillStyle = pipeGradient;
+    // Простий фон — максимально легкий для мобілок
+    ctx.fillStyle = "#03050f";
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Труби (однотонні, без важких градієнтів)
+    ctx.fillStyle = "#00c060";
+    for (const pipe of game.pipes) {
       ctx.fillRect(pipe.x, 0, pipe.width, pipe.gapY);
       ctx.fillRect(
         pipe.x,
@@ -142,57 +99,40 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       );
     }
 
-    // монетка
-    ctx.save();
+    // Монетка (гравець)
     ctx.beginPath();
     ctx.arc(game.bird.x, game.bird.y, game.bird.radius, 0, Math.PI * 2);
-    const coinGradient = ctx.createRadialGradient(
-      game.bird.x - 4,
-      game.bird.y - 4,
-      4,
-      game.bird.x,
-      game.bird.y,
-      game.bird.radius
-    );
-    coinGradient.addColorStop(0, "#fff5b0");
-    coinGradient.addColorStop(0.5, "#ffd84a");
-    coinGradient.addColorStop(1, "#f5b800");
-    ctx.fillStyle = coinGradient;
+    ctx.fillStyle = "#ffd84a";
     ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#b8860b";
+    ctx.strokeStyle = "#8c6a00";
     ctx.stroke();
     ctx.closePath();
 
-    ctx.fillStyle = "#7a4b00";
-    ctx.font = "14px Courier New";
+    ctx.fillStyle = "#663300";
+    ctx.font = "13px Courier New";
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
     ctx.fillText("₿", game.bird.x, game.bird.y + 1);
-    ctx.restore();
 
     // HUD
     ctx.fillStyle = "#fff";
-    ctx.font = "20px Courier New";
+    ctx.font = "16px Courier New";
     ctx.textAlign = "left";
-    ctx.fillText(`Score: ${game.score}`, 16, 32);
-    ctx.fillText(`Best: ${game.bestScore}`, 16, 56);
+    ctx.fillText(`Score: ${game.score}`, 10, 24);
+    ctx.fillText(`Best: ${game.bestScore}`, 10, 44);
 
     ctx.textAlign = "center";
     if (!game.isRunning && !game.gameOver) {
-      ctx.font = "18px Courier New";
       ctx.fillText("Tap to start", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
     }
     if (game.gameOver) {
-      ctx.font = "22px Courier New";
       ctx.fillStyle = "#ff6666";
-      ctx.fillText("Game Over", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 10);
-      ctx.font = "16px Courier New";
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText("Tap to restart", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 18);
+      ctx.fillText("GAME OVER", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+      ctx.fillStyle = "#fff";
+      ctx.fillText("Tap to restart", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
     }
   };
 
+  // ⚡ Без обмеження FPS — повний requestAnimationFrame
   const gameLoop = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -200,52 +140,27 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     if (!ctx) return;
 
     const game = gameRef.current;
-    // скидаємо плавність кадрів — максимально швидко
-ctx.imageSmoothingEnabled = false;
 
-
-    // малюємо готовий фон з офскрін-канвасу
-    if (backgroundCanvasRef.current) {
-      ctx.drawImage(backgroundCanvasRef.current, 0, 0);
-    } else {
-      // запасний варіант, якщо фон ще не готовий
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    }
-
-    const active = game.isRunning && !game.gameOver;
-
-    if (active) {
-      // фізика монетки
+    if (game.isRunning && !game.gameOver) {
+      // Фізика
       game.bird.velocity += GRAVITY;
       game.bird.y += game.bird.velocity;
 
-      // межі
-      if (game.bird.y + game.bird.radius >= CANVAS_HEIGHT) {
-        game.bird.y = CANVAS_HEIGHT - game.bird.radius;
-        endGame();
-      }
-      if (game.bird.y - game.bird.radius <= 0) {
-        game.bird.y = game.bird.radius;
-        endGame();
-      }
+      if (game.bird.y + game.bird.radius >= CANVAS_HEIGHT) endGame();
+      if (game.bird.y - game.bird.radius <= 0) endGame();
 
-      // рух труб
+      // Труби
       for (let pipe of game.pipes) {
         pipe.x -= PIPE_SPEED;
       }
 
-      // додаємо нові труби
-      if (game.pipes.length > 0 && game.pipes[0].x + game.pipes[0].width < 0) {
+      if (game.pipes[0].x + game.pipes[0].width < 0) {
         game.pipes.shift();
         game.pipes.push(createPipe());
       }
 
-      // зіткнення + рахунок
-      for (let pipe of game.pipes) {
-        if (checkCollision(game.bird, pipe)) {
-          endGame();
-        }
+      for (const pipe of game.pipes) {
+        if (checkCollision(game.bird, pipe)) endGame();
 
         if (!pipe.passed && pipe.x + pipe.width < game.bird.x) {
           pipe.passed = true;
@@ -255,30 +170,26 @@ ctx.imageSmoothingEnabled = false;
           if (game.score > game.bestScore) {
             game.bestScore = game.score;
             setBestScore(game.bestScore);
-
-            if (typeof window !== "undefined") {
-              try {
-                window.localStorage.setItem(BEST_KEY, String(game.bestScore));
-              } catch {
-                // ignore
-              }
+            try {
+              localStorage.setItem(BEST_KEY, String(game.bestScore));
+            } catch {
+              // ignore
             }
           }
         }
       }
     }
 
-    // малюємо труби + монету + HUD поверх фону
     drawScene(ctx, game);
 
-    // цикл завжди крутиться
     animationRef.current = requestAnimationFrame(gameLoop);
   };
 
-  // ініціалізація canvas і старт циклу
+  // Ініціалізація canvas + старт циклу
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     canvas.width = CANVAS_WIDTH;
     canvas.height = CANVAS_HEIGHT;
 
@@ -289,47 +200,36 @@ ctx.imageSmoothingEnabled = false;
         cancelAnimationFrame(animationRef.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // обробка кліків / тачів
+  // Кліки / тапи по canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const handleClick = () => {
-      handleTap();
-    };
+    const tap = () => handleTap();
 
-    canvas.addEventListener("click", handleClick);
-    canvas.addEventListener("touchstart", handleClick);
+    canvas.addEventListener("click", tap);
+    canvas.addEventListener("touchstart", tap);
 
     return () => {
-      canvas.removeEventListener("click", handleClick);
-      canvas.removeEventListener("touchstart", handleClick);
+      canvas.removeEventListener("click", tap);
+      canvas.removeEventListener("touchstart", tap);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // пауза анімації, коли вкладка / вебвʼю приховані
+  // Пауза, коли webview / вкладка сховані
   useEffect(() => {
-    const handleVisibility = () => {
+    const onVis = () => {
       if (document.hidden) {
-        if (animationRef.current !== null) {
-          cancelAnimationFrame(animationRef.current);
-          animationRef.current = null;
-        }
+        if (animationRef.current) cancelAnimationFrame(animationRef.current);
       } else {
-        if (animationRef.current === null) {
-          animationRef.current = requestAnimationFrame(gameLoop);
-        }
+        animationRef.current = requestAnimationFrame(gameLoop);
       }
     };
 
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
   return (
@@ -337,61 +237,44 @@ ctx.imageSmoothingEnabled = false;
       style={{
         height: "100vh",
         background: "#000",
-        color: "#fff",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 12,
+        gap: 10,
+        padding: "10px 0",
         fontFamily: "Courier New",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          width: "100%",
-          maxWidth: 380,
-          padding: "8px 16px",
-        }}
-      >
-        <button
-          onClick={onExit}
-          style={{
-            padding: "6px 12px",
-            background: "#444",
-            color: "#fff",
-            borderRadius: 6,
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          ⬅ Назад
-        </button>
-        <div style={{ fontSize: 14, opacity: 0.8 }}>Flappy Coin</div>
-      </div>
-
       <canvas
         ref={canvasRef}
         style={{
           borderRadius: 12,
           border: "2px solid #333",
           maxWidth: "100%",
-          touchAction: "none", // важливо для мобільних, щоб не скролило при тапі
+          touchAction: "none",
         }}
       />
 
-      <div
+      <div style={{ color: "#fff", fontSize: 14 }}>
+        Score: {score} | Best: {bestScore} {gameOver ? "· Game over" : ""}
+      </div>
+
+      <button
+        onClick={onExit}
         style={{
+          padding: "8px 16px",
+          borderRadius: 999,
+          border: "none",
+          cursor: "pointer",
+          background: "#444",
+          color: "#fff",
+          fontWeight: 600,
           fontSize: 14,
-          marginTop: 4,
-          textAlign: "center",
         }}
       >
-        Score: <b>{score}</b> · Best: <b>{bestScore}</b>{" "}
-        {gameOver && <span style={{ color: "#ff6666" }}>· Game over</span>}
-        {!isRunning && !gameOver && <span> · Tap canvas to start</span>}
-      </div>
+        ⬅ Вийти в меню
+      </button>
     </div>
   );
 }

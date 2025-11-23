@@ -1,37 +1,45 @@
-import type { Bird, Pipe, GameState } from "./types";
+// Розміри канвасу: менші на мобілці, більші на десктопі
+export const CANVAS_WIDTH =
+  typeof window !== "undefined" && window.innerWidth < 500 ? 240 : 380;
 
+export const CANVAS_HEIGHT =
+  typeof window !== "undefined" && window.innerHeight < 700 ? 350 : 520;
 
-export const CANVAS_WIDTH = 360;
-export const CANVAS_HEIGHT = 640;
-
-export function createInitialBird(): Bird {
-  return {
-    x: CANVAS_WIDTH / 4,
-    y: CANVAS_HEIGHT / 2,
-    radius: 14,
-    velocity: 0,
-  };
+// Типи
+export interface Bird {
+  x: number;
+  y: number;
+  radius: number;
+  velocity: number;
 }
 
-export function createPipe(startX?: number): Pipe {
-  const gapHeight = 150;
-  const minGapY = 80;
-  const maxGapY = CANVAS_HEIGHT - 80 - gapHeight;
-  const gapY = Math.random() * (maxGapY - minGapY) + minGapY;
-
-  return {
-    x: startX ?? CANVAS_WIDTH,
-    width: 60,
-    gapY,
-    gapHeight,
-    passed: false,
-  };
+export interface Pipe {
+  x: number;
+  width: number;
+  gapY: number;
+  gapHeight: number;
+  passed: boolean;
 }
 
+export interface GameState {
+  bird: Bird;
+  pipes: Pipe[];
+  score: number;
+  bestScore: number;
+  isRunning: boolean;
+  gameOver: boolean;
+}
+
+// Початковий стан гри
 export function createInitialState(): GameState {
   return {
-    bird: createInitialBird(),
-    pipes: [createPipe(CANVAS_WIDTH + 100), createPipe(CANVAS_WIDTH + 320)],
+    bird: {
+      x: CANVAS_WIDTH / 3,
+      y: CANVAS_HEIGHT / 2,
+      radius: 14,
+      velocity: 0,
+    },
+    pipes: [createPipe()],
     score: 0,
     bestScore: 0,
     isRunning: false,
@@ -39,35 +47,34 @@ export function createInitialState(): GameState {
   };
 }
 
-export function resetGame(state: GameState): GameState {
-  const bestScore = state.bestScore;
-  const newState = createInitialState();
-  newState.bestScore = bestScore;
-  return newState;
+// Легкі труби для мобільних
+export function createPipe(): Pipe {
+  const gapHeight = CANVAS_HEIGHT < 400 ? 80 : 110;
+
+  return {
+    x: CANVAS_WIDTH,
+    width: 40,
+    gapY: Math.random() * (CANVAS_HEIGHT - gapHeight),
+    gapHeight,
+    passed: false,
+  };
 }
 
+// Перевірка зіткнення монетки з трубами
 export function checkCollision(bird: Bird, pipe: Pipe): boolean {
-  // зіткнення із землею/стелею буде окремо
-  const birdLeft = bird.x - bird.radius;
-  const birdRight = bird.x + bird.radius;
-  const birdTop = bird.y - bird.radius;
-  const birdBottom = bird.y + bird.radius;
-
-  const pipeLeft = pipe.x;
-  const pipeRight = pipe.x + pipe.width;
-
-  // якщо не перетинаємося по X – зіткнення немає
-  if (birdRight < pipeLeft || birdLeft > pipeRight) {
-    return false;
+  if (
+    bird.x + bird.radius > pipe.x &&
+    bird.x - bird.radius < pipe.x + pipe.width
+  ) {
+    if (bird.y - bird.radius < pipe.gapY) return true;
+    if (bird.y + bird.radius > pipe.gapY + pipe.gapHeight) return true;
   }
-
-  const gapTop = pipe.gapY;
-  const gapBottom = pipe.gapY + pipe.gapHeight;
-
-  // якщо пташка ВИХОДИТЬ за межі gap – то зіткнення
-  if (birdTop < gapTop || birdBottom > gapBottom) {
-    return true;
-  }
-
   return false;
+}
+
+// Рестарт гри, зберігаємо тільки bestScore
+export function resetGame(state: GameState): GameState {
+  const newState = createInitialState();
+  newState.bestScore = state.bestScore;
+  return newState;
 }
