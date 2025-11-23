@@ -24,6 +24,9 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
   const animationRef = useRef<number | null>(null);
   const gameRef = useRef<GameState>(createInitialState());
 
+  // офскрін-канвас для статичного фону
+  const backgroundCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const [score, setScore] = useState(0);
   const [bestScore, setBestScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
@@ -42,9 +45,33 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
           }
         }
       } catch {
-        // ignore
+        // якщо localStorage недоступний – пропускаємо
       }
     }
+  }, []);
+
+  // малюємо фон один раз на офскрін-канвасі
+  useEffect(() => {
+    const bg = document.createElement("canvas");
+    bg.width = CANVAS_WIDTH;
+    bg.height = CANVAS_HEIGHT;
+    const bgCtx = bg.getContext("2d");
+    if (bgCtx) {
+      const gradient = bgCtx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+      gradient.addColorStop(0, "#060821");
+      gradient.addColorStop(1, "#020308");
+      bgCtx.fillStyle = gradient;
+      bgCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      // зорі
+      bgCtx.fillStyle = "rgba(255,255,255,0.13)";
+      for (let i = 0; i < 25; i++) {
+        const x = (i * 57) % CANVAS_WIDTH;
+        const y = (i * 103) % CANVAS_HEIGHT;
+        bgCtx.fillRect(x, y, 2, 2);
+      }
+    }
+    backgroundCanvasRef.current = bg;
   }, []);
 
   // TAP по canvas: старт / стрибок / рестарт
@@ -53,7 +80,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
 
     // якщо гра закінчена – повний restart + миттєвий старт
     if (game.gameOver) {
-      const restarted = resetGame(game);
+      const restarted = resetGame(game); // новий state, переносить bestScore
       restarted.isRunning = true;
       restarted.bird.velocity = JUMP_FORCE;
 
@@ -76,95 +103,10 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     game.bird.velocity = JUMP_FORCE;
   };
 
-  const gameLoop = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const game = gameRef.current;
-
-    // фон
-    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-    gradient.addColorStop(0, "#060821");
-    gradient.addColorStop(1, "#020308");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // зорі
-    ctx.fillStyle = "rgba(255,255,255,0.13)";
-    for (let i = 0; i < 25; i++) {
-      const x = (i * 57) % CANVAS_WIDTH;
-      const y = (i * 103) % CANVAS_HEIGHT;
-      ctx.fillRect(x, y, 2, 2);
-    }
-
-    const active = game.isRunning && !game.gameOver;
-
-    if (active) {
-      // фізика монетки
-      game.bird.velocity += GRAVITY;
-      game.bird.y += game.bird.velocity;
-
-      // межі
-      if (game.bird.y + game.bird.radius >= CANVAS_HEIGHT) {
-        game.bird.y = CANVAS_HEIGHT - game.bird.radius;
-        endGame();
-      }
-      if (game.bird.y - game.bird.radius <= 0) {
-        game.bird.y = game.bird.radius;
-        endGame();
-      }
-
-      // рух труб
-      for (let pipe of game.pipes) {
-        pipe.x -= PIPE_SPEED;
-      }
-
-      // додаємо нові труби
-      if (game.pipes.length > 0 && game.pipes[0].x + game.pipes[0].width < 0) {
-        game.pipes.shift();
-        game.pipes.push(createPipe());
-      }
-
-      // зіткнення + рахунок
-      for (let pipe of game.pipes) {
-        if (checkCollision(game.bird, pipe)) {
-          endGame();
-        }
-
-        if (!pipe.passed && pipe.x + pipe.width < game.bird.x) {
-          pipe.passed = true;
-          game.score += 1;
-          setScore(game.score);
-
-          if (game.score > game.bestScore) {
-            game.bestScore = game.score;
-            setBestScore(game.bestScore);
-
-            if (typeof window !== "undefined") {
-              try {
-                window.localStorage.setItem(BEST_KEY, String(game.bestScore));
-              } catch {
-                // ignore
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // малюємо труби + монету + HUD
-    drawScene(ctx, game);
-
-    // цикл завжди крутиться
-    animationRef.current = requestAnimationFrame(gameLoop);
-  };
-
   const endGame = () => {
     const game = gameRef.current;
 
-    if (game.gameOver) return; // захист
+    if (game.gameOver) return; // захист від повторного виклику
 
     game.gameOver = true;
     game.isRunning = false;
@@ -250,6 +192,86 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     }
   };
 
+  const gameLoop = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const game = gameRef.current;
+
+    // малюємо готовий фон з офскрін-канвасу
+    if (backgroundCanvasRef.current) {
+      ctx.drawImage(backgroundCanvasRef.current, 0, 0);
+    } else {
+      // запасний варіант, якщо фон ще не готовий
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
+
+    const active = game.isRunning && !game.gameOver;
+
+    if (active) {
+      // фізика монетки
+      game.bird.velocity += GRAVITY;
+      game.bird.y += game.bird.velocity;
+
+      // межі
+      if (game.bird.y + game.bird.radius >= CANVAS_HEIGHT) {
+        game.bird.y = CANVAS_HEIGHT - game.bird.radius;
+        endGame();
+      }
+      if (game.bird.y - game.bird.radius <= 0) {
+        game.bird.y = game.bird.radius;
+        endGame();
+      }
+
+      // рух труб
+      for (let pipe of game.pipes) {
+        pipe.x -= PIPE_SPEED;
+      }
+
+      // додаємо нові труби
+      if (game.pipes.length > 0 && game.pipes[0].x + game.pipes[0].width < 0) {
+        game.pipes.shift();
+        game.pipes.push(createPipe());
+      }
+
+      // зіткнення + рахунок
+      for (let pipe of game.pipes) {
+        if (checkCollision(game.bird, pipe)) {
+          endGame();
+        }
+
+        if (!pipe.passed && pipe.x + pipe.width < game.bird.x) {
+          pipe.passed = true;
+          game.score += 1;
+          setScore(game.score);
+
+          if (game.score > game.bestScore) {
+            game.bestScore = game.score;
+            setBestScore(game.bestScore);
+
+            if (typeof window !== "undefined") {
+              try {
+                window.localStorage.setItem(BEST_KEY, String(game.bestScore));
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // малюємо труби + монету + HUD поверх фону
+    drawScene(ctx, game);
+
+    // цикл завжди крутиться
+    animationRef.current = requestAnimationFrame(gameLoop);
+  };
+
+  // ініціалізація canvas і старт циклу
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -259,11 +281,14 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     animationRef.current = requestAnimationFrame(gameLoop);
 
     return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      if (animationRef.current !== null) {
+        cancelAnimationFrame(animationRef.current);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // обробка кліків / тачів
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -280,6 +305,27 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       canvas.removeEventListener("touchstart", handleClick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // пауза анімації, коли вкладка / вебвʼю приховані
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (animationRef.current !== null) {
+          cancelAnimationFrame(animationRef.current);
+          animationRef.current = null;
+        }
+      } else {
+        if (animationRef.current === null) {
+          animationRef.current = requestAnimationFrame(gameLoop);
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   return (
@@ -316,7 +362,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
             cursor: "pointer",
           }}
         >
-          ⬅ Back
+          ⬅ Назад
         </button>
         <div style={{ fontSize: 14, opacity: 0.8 }}>Flappy Coin</div>
       </div>
@@ -327,6 +373,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
           borderRadius: 12,
           border: "2px solid #333",
           maxWidth: "100%",
+          touchAction: "none", // важливо для мобільних, щоб не скролило при тапі
         }}
       />
 
