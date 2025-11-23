@@ -3,9 +3,10 @@ import WebApp from "@twa-dev/sdk";
 import { FlappyScreen } from "./screens/FlappyScreen";
 import { LeaderboardScreen } from "./screens/LeaderboardScreen";
 import { VipTournamentsScreen } from "./screens/VipTournamentsScreen";
+import { FlappyHubScreen } from "./screens/FlappyHubScreen";
 import { addScoreToLeaderboard } from "./leaderboard/storage";
 
-type Screen = "menu" | "flappy" | "leaderboard" | "vip";
+type Screen = "menu" | "flappyHub" | "flappyPlay" | "flappyLeaderboard" | "vip";
 
 interface ProfileInfo {
   id: string;
@@ -34,7 +35,7 @@ function getProfileFromTelegram(): ProfileInfo {
       return { id, name, avatarInitial: initial, avatarUrl };
     }
   } catch {
-    // не в Telegram / неможливо прочитати
+    // не в Telegram / initData недоступний
   }
 
   return {
@@ -64,6 +65,7 @@ function App() {
   const [xp, setXp] = useState(0);
   const [lastGain, setLastGain] = useState(0);
 
+  // завантажуємо XP з localStorage для цього telegramUserId
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -80,6 +82,7 @@ function App() {
     }
   }, [XP_KEY]);
 
+  // зберігаємо XP
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -92,41 +95,75 @@ function App() {
 
   const { level, progress, nextLevelXp } = calcLevel(xp);
 
+  // викликається, коли Flappy закінчує гру
   const handleGameOver = (sessionScore: number) => {
     const gainedXp = sessionScore * 10;
 
-    // пишемо в локальний лідерборд із Telegram user id
-    addScoreToLeaderboard(profile.id, profile.name, sessionScore);
+    // локально зберігаємо найкращий score цього юзера в Flappy Coin
+    addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
+
+    // 🔗 ТУТ У МАЙБУТНЬОМУ: виклик бекенду, щоб:
+    // 1) оновити глобальний XP
+    // 2) оновити глобальний лідерборд по грі
+    //
+    // приклад:
+    // fetch("/api/score", {
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify({
+    //     telegramUserId: profile.id,
+    //     name: profile.name,
+    //     game: "flappy_coin",
+    //     score: sessionScore,
+    //   }),
+    // }).catch(() => {});
 
     if (gainedXp <= 0) {
-      // лишаємось у грі, рестарт по tap
+      // гра закінчилась, але XP не додаємо
       return;
     }
 
     setXp((prev) => prev + gainedXp);
     setLastGain(gainedXp);
 
-    // НЕ переходимо в меню — гравець бачить Game Over і може рестартнути
+    // не переходимо в меню — Flappy сам покаже Game Over і дасть рестарт по tap
   };
 
-  if (screen === "flappy") {
+  // екрани
+  if (screen === "flappyPlay") {
     return (
       <FlappyScreen
-        onExitToMenu={() => setScreen("menu")}
+        onExitToMenu={() => setScreen("flappyHub")}
         onGameOver={handleGameOver}
       />
     );
   }
 
-  if (screen === "leaderboard") {
-    return <LeaderboardScreen onBack={() => setScreen("menu")} />;
+  if (screen === "flappyLeaderboard") {
+    return (
+      <LeaderboardScreen
+        onBack={() => setScreen("flappyHub")}
+        gameKey="flappy_coin"
+        gameTitle="Flappy Coin"
+      />
+    );
+  }
+
+  if (screen === "flappyHub") {
+    return (
+      <FlappyHubScreen
+        onBack={() => setScreen("menu")}
+        onPlay={() => setScreen("flappyPlay")}
+        onOpenLeaderboard={() => setScreen("flappyLeaderboard")}
+      />
+    );
   }
 
   if (screen === "vip") {
     return <VipTournamentsScreen onBack={() => setScreen("menu")} />;
   }
 
-  // ==== MENU SCREEN ====
+  // ==== ГОЛОВНА (MENU) З XP-ЛІДЕРБОРДОМ ====
   return (
     <div
       style={{
@@ -227,7 +264,7 @@ function App() {
           background: "rgba(0,0,0,0.5)",
           borderRadius: 10,
           padding: "8px 10px 10px",
-          marginBottom: 18,
+          marginBottom: 12,
           border: "1px solid rgba(255,255,255,0.08)",
         }}
       >
@@ -280,6 +317,98 @@ function App() {
         </div>
       </div>
 
+      {/* GLOBAL XP LEADERBOARD PREVIEW */}
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          marginBottom: 14,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 14,
+            marginBottom: 4,
+            color: "#ffcc33",
+          }}
+        >
+          🏆 Global XP Leaderboard (prototype)
+        </div>
+        <div
+          style={{
+            background: "rgba(0,0,0,0.55)",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.12)",
+            padding: "8px 10px",
+            fontSize: 12,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <div
+                style={{
+                  width: 22,
+                  textAlign: "right",
+                  fontWeight: 700,
+                  color: "#ffcc33",
+                }}
+              >
+                #1
+              </div>
+              <div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  {profile.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    opacity: 0.75,
+                  }}
+                >
+                  Your current XP
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: "#5bff9c",
+              }}
+            >
+              {xp} XP
+            </div>
+          </div>
+        </div>
+        <div
+          style={{
+            fontSize: 10,
+            opacity: 0.65,
+            marginTop: 4,
+          }}
+        >
+          For now this board shows only you. Once we add backend, this will be a
+          real global XP ranking between all Telegram players.
+        </div>
+      </div>
+
       {/* TITLE */}
       <div
         style={{
@@ -304,8 +433,8 @@ function App() {
             opacity: 0.65,
           }}
         >
-          Play games, climb the leaderboard, join VIP tournaments and earn
-          rewards.
+          Open a game hub, play to earn XP, check leaderboards or join VIP
+          tournaments.
         </div>
       </div>
 
@@ -319,9 +448,9 @@ function App() {
           gap: 10,
         }}
       >
-        {/* Flappy Coin */}
+        {/* Flappy hub */}
         <button
-          onClick={() => setScreen("flappy")}
+          onClick={() => setScreen("flappyHub")}
           style={{
             width: "100%",
             display: "flex",
@@ -369,7 +498,7 @@ function App() {
                   color: "#b8ffd2",
                 }}
               >
-                Dodge pipes, collect coins, farm XP.
+                Open hub: play or see leaderboard.
               </div>
             </div>
           </div>
@@ -383,36 +512,8 @@ function App() {
               color: "#5bff9c",
             }}
           >
-            Play
+            Open
           </div>
-        </button>
-
-        {/* Leaderboard */}
-        <button
-          onClick={() => setScreen("leaderboard")}
-          style={{
-            width: "100%",
-            padding: "9px 12px",
-            borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "linear-gradient(135deg, #0b1510, #050908)",
-            color: "#5bff9c",
-            fontSize: 13,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <span>🏆 Leaderboard</span>
-          <span
-            style={{
-              fontSize: 11,
-              opacity: 0.85,
-            }}
-          >
-            best Flappy Coin players
-          </span>
         </button>
 
         {/* VIP Tournaments */}

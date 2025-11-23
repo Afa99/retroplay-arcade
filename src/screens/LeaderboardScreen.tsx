@@ -1,19 +1,25 @@
 import { useEffect, useState } from "react";
 import {
-  loadLeaderboard,
+  loadLeaderboardForGame,
   type LeaderboardEntry,
 } from "../leaderboard/storage";
 
 interface LeaderboardScreenProps {
   onBack: () => void;
+  gameKey: string;   // "flappy_coin"
+  gameTitle: string; // "Flappy Coin"
 }
 
-export function LeaderboardScreen({ onBack }: LeaderboardScreenProps) {
+export function LeaderboardScreen({
+  onBack,
+  gameKey,
+  gameTitle,
+}: LeaderboardScreenProps) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
 
   useEffect(() => {
-    setEntries(loadLeaderboard());
-  }, []);
+    setEntries(loadLeaderboardForGame(gameKey));
+  }, [gameKey]);
 
   return (
     <div
@@ -58,7 +64,7 @@ export function LeaderboardScreen({ onBack }: LeaderboardScreenProps) {
             color: "#5bff9c",
           }}
         >
-          Leaderboard
+          {gameTitle} — Leaderboard
         </div>
       </div>
 
@@ -81,7 +87,7 @@ export function LeaderboardScreen({ onBack }: LeaderboardScreenProps) {
               padding: "16px 0",
             }}
           >
-            No scores yet. Play Flappy Coin and set the first record!
+            No scores yet. Play {gameTitle} and set the first record!
           </div>
         ) : (
           <div
@@ -92,7 +98,7 @@ export function LeaderboardScreen({ onBack }: LeaderboardScreenProps) {
             }}
           >
             {entries.map((entry, index) => {
-              const date = new Date(entry.date);
+              const date = new Date(entry.updatedAt);
               const dateLabel = date.toLocaleDateString(undefined, {
                 day: "2-digit",
                 month: "2-digit",
@@ -103,7 +109,7 @@ export function LeaderboardScreen({ onBack }: LeaderboardScreenProps) {
 
               return (
                 <div
-                  key={`${entry.userId}-${entry.date}-${index}`}
+                  key={`${entry.userId}-${entry.gameKey}-${index}`}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -180,8 +186,8 @@ export function LeaderboardScreen({ onBack }: LeaderboardScreenProps) {
           maxWidth: 420,
         }}
       >
-        This leaderboard is local for now. Later we&apos;ll sync it globally by
-        Telegram user id and use it for weekly VIP tournaments & airdrops.
+        Each player is shown once with their best score in this game. Later
+        we&apos;ll sync this globally between all Telegram users via backend.
       </div>
     </div>
   );
