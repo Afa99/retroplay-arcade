@@ -11,6 +11,7 @@ import type { GameState } from "./types";
 
 interface FlappyProps {
   onExit: () => void;
+  onGameOver?: (sessionScore: number) => void;
 }
 
 const GRAVITY = 0.6;
@@ -18,7 +19,7 @@ const JUMP_FORCE = -9;
 const PIPE_SPEED = 2.4;
 const BEST_KEY = "flappyBestScore";
 
-export function Flappy({ onExit }: FlappyProps) {
+export function Flappy({ onExit, onGameOver }: FlappyProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const gameRef = useRef<GameState>(createInitialState());
@@ -28,7 +29,7 @@ export function Flappy({ onExit }: FlappyProps) {
   const [gameOver, setGameOver] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
 
-  // ===== 1. Завантажуємо bestScore з localStorage (захищено try/catch) =====
+  // завантажуємо bestScore з localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -46,11 +47,11 @@ export function Flappy({ onExit }: FlappyProps) {
     }
   }, []);
 
-  // ===== 2. TAP по canvas: старт / стрибок / рестарт =====
+  // TAP по canvas: старт / стрибок / рестарт
   const handleTap = () => {
     const game = gameRef.current;
 
-    // 👉 Якщо гра закінчена – робимо повний restart + одразу стартуємо
+    // 👉 Якщо гра закінчена – повний restart + одразу стартуємо
     if (game.gameOver) {
       const restarted = resetGame(game); // створює новий state, переносить bestScore
       restarted.isRunning = true;
@@ -75,7 +76,6 @@ export function Flappy({ onExit }: FlappyProps) {
     game.bird.velocity = JUMP_FORCE;
   };
 
-  // ===== 3. Основний ігровий цикл =====
   const gameLoop = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -84,13 +84,29 @@ export function Flappy({ onExit }: FlappyProps) {
 
     const game = gameRef.current;
 
-    // Оновлюємо фізику і логику тільки якщо гра реально біжить
-    if (game.isRunning && !game.gameOver) {
-      // фізика монетки
+    // фон
+    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    gradient.addColorStop(0, "#060821");
+    gradient.addColorStop(1, "#020308");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // зорі
+    ctx.fillStyle = "rgba(255,255,255,0.13)";
+    for (let i = 0; i < 25; i++) {
+      const x = (i * 57) % CANVAS_WIDTH;
+      const y = (i * 103) % CANVAS_HEIGHT;
+      ctx.fillRect(x, y, 2, 2);
+    }
+
+    const gameIsActive = game.isRunning && !game.gameOver;
+
+    if (gameIsActive) {
+      // фізика монети
       game.bird.velocity += GRAVITY;
       game.bird.y += game.bird.velocity;
 
-      // межі по Y
+      // межі
       if (game.bird.y + game.bird.radius >= CANVAS_HEIGHT) {
         game.bird.y = CANVAS_HEIGHT - game.bird.radius;
         endGame();
@@ -130,7 +146,7 @@ export function Flappy({ onExit }: FlappyProps) {
               try {
                 window.localStorage.setItem(BEST_KEY, String(game.bestScore));
               } catch {
-                // якщо localStorage недоступне — просто ігноруємо
+                // localStorage недоступний – просто пропускаємо
               }
             }
           }
@@ -138,40 +154,40 @@ export function Flappy({ onExit }: FlappyProps) {
       }
     }
 
-    // Малюємо сцену для будь-якого стану (idle / running / over)
     drawScene(ctx, game);
 
-    // Завжди плануємо наступний кадр (цикл ніколи не зупиняється)
     animationRef.current = requestAnimationFrame(gameLoop);
   };
 
   const endGame = () => {
     const game = gameRef.current;
+
+    // захист, щоб не викликати двічі
+    if (game.gameOver) return;
+
     game.gameOver = true;
     game.isRunning = false;
+
     setGameOver(true);
     setIsRunning(false);
+
+    // 🔥 повідомляємо наверх, скільки очок заробив гравець
+    if (onGameOver) {
+      onGameOver(game.score);
+    }
   };
 
   const drawScene = (ctx: CanvasRenderingContext2D, game: GameState) => {
-    // фон
-    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-    gradient.addColorStop(0, "#060821");
-    gradient.addColorStop(1, "#020308");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // зорі
-    ctx.fillStyle = "rgba(255,255,255,0.13)";
-    for (let i = 0; i < 25; i++) {
-      const x = (i * 57) % CANVAS_WIDTH;
-      const y = (i * 103) % CANVAS_HEIGHT;
-      ctx.fillRect(x, y, 2, 2);
-    }
+    // фон ми вже залили в gameLoop, тут малюємо труби + монету + HUD
 
     // труби
     for (const pipe of game.pipes) {
-      const pipeGradient = ctx.createLinearGradient(pipe.x, 0, pipe.x + pipe.width, 0);
+      const pipeGradient = ctx.createLinearGradient(
+        pipe.x,
+        0,
+        pipe.x + pipe.width,
+        0
+      );
       pipeGradient.addColorStop(0, "#02ff7b");
       pipeGradient.addColorStop(1, "#00b24f");
 
@@ -236,7 +252,6 @@ export function Flappy({ onExit }: FlappyProps) {
     }
   };
 
-  // ===== 4. Стартуємо animation loop =====
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -251,7 +266,6 @@ export function Flappy({ onExit }: FlappyProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===== 5. Вішаємо обробник TAP на canvas =====
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
