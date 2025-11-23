@@ -14,9 +14,10 @@ interface FlappyProps {
   onGameOver?: (sessionScore: number) => void;
 }
 
-const GRAVITY = 0.6;
-const JUMP_FORCE = -9;
-const PIPE_SPEED = 2.4;
+const GRAVITY = 0.8;     // падає швидше, динамічніше
+const JUMP_FORCE = -10.5; // сильніший стрибок
+const PIPE_SPEED = 3.6;   // труби рухаються швидше
+
 const BEST_KEY = "flappyBestScore";
 
 export function Flappy({ onExit, onGameOver }: FlappyProps) {
@@ -199,6 +200,9 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     if (!ctx) return;
 
     const game = gameRef.current;
+    // скидаємо плавність кадрів — максимально швидко
+ctx.imageSmoothingEnabled = false;
+
 
     // малюємо готовий фон з офскрін-канвасу
     if (backgroundCanvasRef.current) {
