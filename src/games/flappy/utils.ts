@@ -47,9 +47,10 @@ export function createInitialState(): GameState {
   };
 }
 
-// Легкі труби для мобільних
+// Легкі труби: БІЛЬШИЙ ПРОХІД = простіше грати
 export function createPipe(): Pipe {
-  const gapHeight = CANVAS_HEIGHT < 400 ? 80 : 110;
+  // було 80 / 110 → робимо ширший прохід
+  const gapHeight = CANVAS_HEIGHT < 400 ? 110 : 140;
 
   return {
     x: CANVAS_WIDTH,
@@ -60,7 +61,7 @@ export function createPipe(): Pipe {
   };
 }
 
-// Перевірка зіткнення монетки з трубами
+// Перевірка зіткнення
 export function checkCollision(bird: Bird, pipe: Pipe): boolean {
   if (
     bird.x + bird.radius > pipe.x &&
@@ -72,7 +73,7 @@ export function checkCollision(bird: Bird, pipe: Pipe): boolean {
   return false;
 }
 
-// Рестарт гри, зберігаємо тільки bestScore
+// Рестарт гри, зберігаємо bestScore
 export function resetGame(state: GameState): GameState {
   const newState = createInitialState();
   newState.bestScore = state.bestScore;

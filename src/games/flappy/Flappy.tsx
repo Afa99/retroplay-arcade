@@ -6,19 +6,18 @@ import {
   createPipe,
   resetGame,
   checkCollision,
+  type GameState,
 } from "./utils";
-import type { GameState } from "./utils";
 
 interface FlappyProps {
   onExit: () => void;
   onGameOver?: (score: number) => void;
 }
 
-// Ці значення задумувались під ~60 FPS,
-// але ми будемо масштабувати їх через deltaTime
-const GRAVITY = 0.55;
-const JUMP_FORCE = -9.5;
-const PIPE_SPEED = 2.6;
+// Трохи спокійніші значення
+const GRAVITY = 0.45;      // було 0.55
+const JUMP_FORCE = -8.5;   // було -9.5
+const PIPE_SPEED = 2.0;    // було 2.6
 
 const BEST_KEY = "flappyBestScore";
 
@@ -33,7 +32,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
   const [bestScore, setBestScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
 
-  // ✅ Завантажуємо bestScore з localStorage
+  // Завантажуємо bestScore
   useEffect(() => {
     try {
       const saved = localStorage.getItem(BEST_KEY);
@@ -45,11 +44,10 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
         }
       }
     } catch {
-      // якщо localStorage недоступний — ігноруємо
+      // ignore
     }
   }, []);
 
-  // 🔁 Старт нової гри (виклик з рестарту або з тапу по канвасу)
   const startNewGame = () => {
     const restarted = resetGame(gameRef.current);
     restarted.isRunning = true;
@@ -60,26 +58,21 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     setGameOver(false);
   };
 
-  // 🕹️ Обробка тапу по канвасу
   const handleTap = () => {
     const game = gameRef.current;
 
-    // Якщо гра вже закінчена — тап = рестарт гри
     if (game.gameOver) {
       startNewGame();
       return;
     }
 
-    // Перший старт
     if (!game.isRunning) {
       game.isRunning = true;
     }
 
-    // Стрибок
     game.bird.velocity = JUMP_FORCE;
   };
 
-  // ❌ Кінець гри
   const endGame = () => {
     const game = gameRef.current;
     if (game.gameOver) return;
@@ -91,11 +84,10 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     if (onGameOver) onGameOver(game.score);
   };
 
-  // 🎨 Малювання одного кадру
   const drawScene = (ctx: CanvasRenderingContext2D, game: GameState) => {
     ctx.imageSmoothingEnabled = false;
 
-    // фон (простий, але на повний канвас)
+    // фон на весь канвас
     ctx.fillStyle = "#03050f";
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
@@ -111,7 +103,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       );
     }
 
-    // монетка (player)
+    // монетка
     ctx.beginPath();
     ctx.arc(game.bird.x, game.bird.y, game.bird.radius, 0, Math.PI * 2);
     ctx.fillStyle = "#ffd84a";
@@ -125,26 +117,27 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     ctx.textAlign = "center";
     ctx.fillText("₿", game.bird.x, game.bird.y + 1);
 
-    // HUD
+    // текст у центрі (інфа по старту/рестарту)
     ctx.fillStyle = "#fff";
     ctx.font = "16px Courier New";
-    ctx.textAlign = "left";
-    ctx.fillText(`Score: ${game.score}`, 10, 24);
-    ctx.fillText(`Best: ${game.bestScore}`, 10, 44);
-
     ctx.textAlign = "center";
+
     if (!game.isRunning && !game.gameOver) {
       ctx.fillText("Tap to start", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
     }
+
     if (game.gameOver) {
       ctx.fillStyle = "#ff6666";
       ctx.fillText("GAME OVER", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
       ctx.fillStyle = "#fff";
-      ctx.fillText("Tap to restart", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 22);
+      ctx.fillText(
+        "Tap to restart",
+        CANVAS_WIDTH / 2,
+        CANVAS_HEIGHT / 2 + 22
+      );
     }
   };
 
-  // ⚙️ Головний цикл гри з deltaTime
   const gameLoop = (timestamp: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -153,14 +146,12 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
 
     const game = gameRef.current;
 
-    // deltaTime в "кількості 60fps-кадрів"
     const last = lastTimeRef.current ?? timestamp;
     let delta = (timestamp - last) / (1000 / 60);
-    if (delta > 2) delta = 2; // не даємо грі стрибати при фрізах
+    if (delta > 2) delta = 2;
     lastTimeRef.current = timestamp;
 
     if (game.isRunning && !game.gameOver) {
-      // фізика
       game.bird.velocity += GRAVITY * delta;
       game.bird.y += game.bird.velocity * delta;
 
@@ -173,18 +164,15 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
         endGame();
       }
 
-      // труби
       for (let pipe of game.pipes) {
         pipe.x -= PIPE_SPEED * delta;
       }
 
-      // нові труби
       if (game.pipes[0].x + game.pipes[0].width < 0) {
         game.pipes.shift();
         game.pipes.push(createPipe());
       }
 
-      // колізії + набір очок
       for (const pipe of game.pipes) {
         if (checkCollision(game.bird, pipe)) {
           endGame();
@@ -213,7 +201,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     animationRef.current = requestAnimationFrame(gameLoop);
   };
 
-  // 🧱 Ініціалізація canvas + старт анімації
+  // init canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -232,7 +220,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 🖱️/👆 Обробка кліків і тапів по canvas
+  // tap / click
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -252,7 +240,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ⏸ Пауза, коли webview / вкладка сховані
+  // пауза при приховуванні
   useEffect(() => {
     const onVis = () => {
       if (document.hidden) {
@@ -275,40 +263,59 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
   return (
     <div
       style={{
+        position: "relative",
+        width: "100vw",
         height: "100vh",
         background: "#000",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 10,
-        padding: "8px 0",
+        overflow: "hidden",
         fontFamily: "Courier New, monospace",
       }}
     >
+      {/* CANVAS НА ВЕСЬ ЕКРАН */}
       <canvas
         ref={canvasRef}
         style={{
-          borderRadius: 12,
-          border: "2px solid #333",
-          width: "100%",          // розтягуємо на всю ширину екрану
-          maxWidth: 420,
-          height: "auto",
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
           touchAction: "none",
+          display: "block",
         }}
       />
 
-      <div style={{ color: "#fff", fontSize: 14 }}>
-        Score: {score} | Best: {bestScore} {gameOver ? "· Game over" : ""}
+      {/* SCORE / BEST ЗВЕРХУ */}
+      <div
+        style={{
+          position: "absolute",
+          top: 8,
+          left: "50%",
+          transform: "translateX(-50%)",
+          color: "#fff",
+          fontSize: 14,
+          background: "rgba(0,0,0,0.35)",
+          padding: "4px 10px",
+          borderRadius: 999,
+          border: "1px solid rgba(255,255,255,0.2)",
+        }}
+      >
+        Score: {score} · Best: {bestScore}
       </div>
 
-      {/* 🔘 Після програшу: 2 кнопки — зліва Рестарт, справа Меню */}
+      {/* ДВІ КНОПКИ ПІСЛЯ ПРОГРАШУ */}
       {gameOver && (
         <div
           style={{
-            marginTop: 4,
+            position: "absolute",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
             display: "flex",
             gap: 10,
+            padding: "0 16px",
+            width: "100%",
+            maxWidth: 420,
+            boxSizing: "border-box",
             justifyContent: "center",
           }}
         >
@@ -316,8 +323,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
             onClick={startNewGame}
             style={{
               flex: 1,
-              maxWidth: 160,
-              padding: "8px 14px",
+              padding: "10px 14px",
               borderRadius: 999,
               border: "none",
               cursor: "pointer",
@@ -333,8 +339,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
             onClick={onExit}
             style={{
               flex: 1,
-              maxWidth: 160,
-              padding: "8px 14px",
+              padding: "10px 14px",
               borderRadius: 999,
               border: "none",
               cursor: "pointer",
