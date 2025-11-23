@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import WebApp from "@twa-dev/sdk";
 import { FlappyScreen } from "./screens/FlappyScreen";
+import { LeaderboardScreen } from "./screens/LeaderboardScreen";
+import { VipTournamentsScreen } from "./screens/VipTournamentsScreen";
+import { addScoreToLeaderboard } from "./leaderboard/storage";
 
-type Screen = "menu" | "flappy";
-
-const XP_KEY = "retroplay_xp";
+type Screen = "menu" | "flappy" | "leaderboard" | "vip";
 
 interface ProfileInfo {
+  id: string;
   name: string;
   avatarInitial: string;
   avatarUrl: string | null;
@@ -17,6 +19,7 @@ function getProfileFromTelegram(): ProfileInfo {
     const user = WebApp.initDataUnsafe?.user;
 
     if (user) {
+      const id = String(user.id);
       const name =
         [user.first_name, user.last_name].filter(Boolean).join(" ") ||
         user.username ||
@@ -28,13 +31,14 @@ function getProfileFromTelegram(): ProfileInfo {
 
       const avatarUrl = user.photo_url ?? null;
 
-      return { name, avatarInitial: initial, avatarUrl };
+      return { id, name, avatarInitial: initial, avatarUrl };
     }
   } catch {
-    // якщо не в Telegram (локальний браузер) – просто вертаємо Guest
+    // не в Telegram / неможливо прочитати
   }
 
   return {
+    id: "guest",
     name: "Guest Player",
     avatarInitial: "G",
     avatarUrl: null,
@@ -53,10 +57,12 @@ function calcLevel(xp: number) {
 }
 
 function App() {
+  const profile = getProfileFromTelegram();
+  const XP_KEY = `retroplay_xp_${profile.id}`;
+
   const [screen, setScreen] = useState<Screen>("menu");
   const [xp, setXp] = useState(0);
   const [lastGain, setLastGain] = useState(0);
-  const profile = getProfileFromTelegram();
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -69,32 +75,38 @@ function App() {
           }
         }
       } catch {
-        // ігнор
+        // ignore
       }
     }
-  }, []);
+  }, [XP_KEY]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
         window.localStorage.setItem(XP_KEY, String(xp));
       } catch {
-        // ігнор
+        // ignore
       }
     }
-  }, [xp]);
+  }, [xp, XP_KEY]);
 
   const { level, progress, nextLevelXp } = calcLevel(xp);
 
   const handleGameOver = (sessionScore: number) => {
     const gainedXp = sessionScore * 10;
+
+    // пишемо в локальний лідерборд із Telegram user id
+    addScoreToLeaderboard(profile.id, profile.name, sessionScore);
+
     if (gainedXp <= 0) {
-      setScreen("menu");
+      // лишаємось у грі, рестарт по tap
       return;
     }
+
     setXp((prev) => prev + gainedXp);
     setLastGain(gainedXp);
-    setScreen("menu");
+
+    // НЕ переходимо в меню — гравець бачить Game Over і може рестартнути
   };
 
   if (screen === "flappy") {
@@ -106,6 +118,15 @@ function App() {
     );
   }
 
+  if (screen === "leaderboard") {
+    return <LeaderboardScreen onBack={() => setScreen("menu")} />;
+  }
+
+  if (screen === "vip") {
+    return <VipTournamentsScreen onBack={() => setScreen("menu")} />;
+  }
+
+  // ==== MENU SCREEN ====
   return (
     <div
       style={{
@@ -275,7 +296,7 @@ function App() {
             color: "#5bff9c",
           }}
         >
-          🎮 Games
+          🎮 Games & Events
         </div>
         <div
           style={{
@@ -283,11 +304,12 @@ function App() {
             opacity: 0.65,
           }}
         >
-          Play games, earn XP and climb to the top of RetroPlay.
+          Play games, climb the leaderboard, join VIP tournaments and earn
+          rewards.
         </div>
       </div>
 
-      {/* GAMES LIST */}
+      {/* LIST */}
       <div
         style={{
           width: "100%",
@@ -335,7 +357,7 @@ function App() {
                   fontSize: 14,
                   fontWeight: 600,
                   marginBottom: 2,
-                  color: "#ffcc33", // 🟡 ЗОЛОТИЙ ТЕКСТ НАЗВИ ГРИ
+                  color: "#ffcc33",
                 }}
               >
                 Flappy Coin
@@ -344,7 +366,7 @@ function App() {
                 style={{
                   fontSize: 11,
                   opacity: 0.8,
-                  color: "#b8ffd2", // мʼякий зелений опис
+                  color: "#b8ffd2",
                 }}
               >
                 Dodge pipes, collect coins, farm XP.
@@ -365,18 +387,61 @@ function App() {
           </div>
         </button>
 
-        {/* Placeholder games */}
-        <div
+        {/* Leaderboard */}
+        <button
+          onClick={() => setScreen("leaderboard")}
           style={{
-            opacity: 0.5,
-            borderRadius: 12,
-            border: "1px dashed rgba(255,255,255,0.15)",
+            width: "100%",
             padding: "9px 12px",
-            fontSize: 11,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)",
+            background: "linear-gradient(135deg, #0b1510, #050908)",
+            color: "#5bff9c",
+            fontSize: 13,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
           }}
         >
-          More retro games (Dino Run, 2048, Stack Tower...) coming soon.
-        </div>
+          <span>🏆 Leaderboard</span>
+          <span
+            style={{
+              fontSize: 11,
+              opacity: 0.85,
+            }}
+          >
+            best Flappy Coin players
+          </span>
+        </button>
+
+        {/* VIP Tournaments */}
+        <button
+          onClick={() => setScreen("vip")}
+          style={{
+            width: "100%",
+            padding: "9px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,204,0,0.3)",
+            background: "linear-gradient(135deg, #2b1c16, #0e0805)",
+            color: "#ffcc66",
+            fontSize: 13,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>💎 VIP Weekly Tournaments</span>
+          <span
+            style={{
+              fontSize: 11,
+              opacity: 0.9,
+            }}
+          >
+            coming soon
+          </span>
+        </button>
       </div>
     </div>
   );

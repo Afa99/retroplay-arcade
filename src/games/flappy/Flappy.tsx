@@ -42,7 +42,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
           }
         }
       } catch {
-        // якщо в Telegram або браузері нема доступу до localStorage – просто ігноруємо
+        // ignore
       }
     }
   }, []);
@@ -51,9 +51,9 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
   const handleTap = () => {
     const game = gameRef.current;
 
-    // 👉 Якщо гра закінчена – повний restart + одразу стартуємо
+    // якщо гра закінчена – повний restart + миттєвий старт
     if (game.gameOver) {
-      const restarted = resetGame(game); // створює новий state, переносить bestScore
+      const restarted = resetGame(game);
       restarted.isRunning = true;
       restarted.bird.velocity = JUMP_FORCE;
 
@@ -66,13 +66,13 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       return;
     }
 
-    // 👉 Якщо ще не стартували – запускаємо гру
+    // якщо ще не стартували – запускаємо гру
     if (!game.isRunning) {
       game.isRunning = true;
       setIsRunning(true);
     }
 
-    // 👉 Стрибок
+    // стрибок
     game.bird.velocity = JUMP_FORCE;
   };
 
@@ -99,10 +99,10 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       ctx.fillRect(x, y, 2, 2);
     }
 
-    const gameIsActive = game.isRunning && !game.gameOver;
+    const active = game.isRunning && !game.gameOver;
 
-    if (gameIsActive) {
-      // фізика монети
+    if (active) {
+      // фізика монетки
       game.bird.velocity += GRAVITY;
       game.bird.y += game.bird.velocity;
 
@@ -146,7 +146,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
               try {
                 window.localStorage.setItem(BEST_KEY, String(game.bestScore));
               } catch {
-                // localStorage недоступний – просто пропускаємо
+                // ignore
               }
             }
           }
@@ -154,16 +154,17 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       }
     }
 
+    // малюємо труби + монету + HUD
     drawScene(ctx, game);
 
+    // цикл завжди крутиться
     animationRef.current = requestAnimationFrame(gameLoop);
   };
 
   const endGame = () => {
     const game = gameRef.current;
 
-    // захист, щоб не викликати двічі
-    if (game.gameOver) return;
+    if (game.gameOver) return; // захист
 
     game.gameOver = true;
     game.isRunning = false;
@@ -171,15 +172,12 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     setGameOver(true);
     setIsRunning(false);
 
-    // 🔥 повідомляємо наверх, скільки очок заробив гравець
     if (onGameOver) {
       onGameOver(game.score);
     }
   };
 
   const drawScene = (ctx: CanvasRenderingContext2D, game: GameState) => {
-    // фон ми вже залили в gameLoop, тут малюємо труби + монету + HUD
-
     // труби
     for (const pipe of game.pipes) {
       const pipeGradient = ctx.createLinearGradient(
