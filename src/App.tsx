@@ -8,7 +8,6 @@ import { addScoreToLeaderboard } from "./leaderboard/storage";
 import {
   syncUserWithBackend,
   submitFlappyScoreToBackend,
-  type BackendProfile,
 } from "./api/backend";
 
 type Screen = "menu" | "flappyHub" | "flappyPlay" | "flappyLeaderboard" | "vip";
@@ -70,9 +69,6 @@ function App() {
   const [xp, setXp] = useState(0);
   const [lastGain, setLastGain] = useState(0);
 
-  const [backendProfile, setBackendProfile] = useState<BackendProfile | null>(
-    null
-  );
   const [userId, setUserId] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -119,10 +115,9 @@ function App() {
         if (cancelled) return;
 
         setUserId(userId);
-        setBackendProfile(backend);
 
         // бекенд → основне джерело XP
-        setXp(backend.xp);
+        setXp(backend?.xp ?? 0);
       } catch (e) {
         console.error("Backend sync error:", e);
       } finally {
@@ -163,7 +158,6 @@ function App() {
         });
 
         if (updated) {
-          setBackendProfile(updated);
           setXp(updated.xp); // синхронізуємося з тим, що в базі
         }
       } catch (e) {
