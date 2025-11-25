@@ -8,8 +8,7 @@ export interface BackendProfile {
 }
 
 /**
- * Синхронізація Telegram-юзера з таблицями users + profiles.
- * Якщо ти гість (не з Telegram) — бекенд не чіпаємо.
+ * Синхронізація Telegram-користувача з таблицями users + profiles.
  */
 export async function syncUserWithBackend(params: {
   telegramId: string;
@@ -17,17 +16,9 @@ export async function syncUserWithBackend(params: {
 }): Promise<{ userId: number; profile: BackendProfile }> {
   const { telegramId, name } = params;
 
-  // Локальний запуск (npm run dev в браузері, не в Telegram)
-  if (telegramId === "guest") {
-    return {
-      userId: 0,
-      profile: { xp: 0, total_games: 0, total_score: 0 },
-    };
-  }
-
   const tgUser = WebApp.initDataUnsafe?.user;
 
-  const username = tgUser?.username ?? null;
+  const username = tgUser?.username ?? name ?? "Player";
   const first_name = tgUser?.first_name ?? null;
   const last_name = tgUser?.last_name ?? null;
 
@@ -37,7 +28,7 @@ export async function syncUserWithBackend(params: {
     .upsert(
       {
         telegram_id: telegramId,
-        username: username ?? name, // fallback = повне ім'я
+        username,
         first_name,
         last_name,
       },
@@ -48,7 +39,11 @@ export async function syncUserWithBackend(params: {
 
   if (userError || !userRow) {
     console.error("syncUserWithBackend users error:", userError);
-    throw userError ?? new Error("Failed to upsert user");
+    // хай хоч застосунок лишається живим
+    return {
+      userId: 0,
+      profile: { xp: 0, total_games: 0, total_score: 0 },
+    };
   }
 
   const userId = Number(userRow.id);
@@ -56,10 +51,7 @@ export async function syncUserWithBackend(params: {
   // 2) гарантуємо, що профіль існує
   const { error: profileUpsertError } = await supabase
     .from("profiles")
-    .upsert(
-      { user_id: userId },
-      { onConflict: "user_id" }
-    );
+    .upsert({ user_id: userId }, { onConflict: "user_id" });
 
   if (profileUpsertError) {
     console.error(
@@ -68,7 +60,7 @@ export async function syncUserWithBackend(params: {
     );
   }
 
-  // 3) читаємо поточний профіль
+  // 3) читаємо профіль
   const { data: profileRow, error: profileSelectError } = await supabase
     .from("profiles")
     .select("xp,total_games,total_score")
@@ -97,8 +89,8 @@ export async function syncUserWithBackend(params: {
 }
 
 /**
- * Записує результат гри (конкретної) + оновлює XP.
- * Підходить не тільки для Flappy, а для будь-якої гри з певним gameKey.
+ * Запис результату по грі + оновлення XP.
+ * Працює для будь-якої гри з певним gameKey (наприклад 'flappy_coin').
  */
 export async function submitFlappyScoreToBackend(params: {
   userId: number;
@@ -108,8 +100,8 @@ export async function submitFlappyScoreToBackend(params: {
 }): Promise<BackendProfile | null> {
   const { userId, score, xpDelta, gameKey } = params;
 
-  // Якщо гість / немає userId — просто пропускаємо бекенд
   if (!userId || userId <= 0) {
+    // немає валідного юзера в базі
     return null;
   }
 
@@ -129,33 +121,43 @@ export async function submitFlappyScoreToBackend(params: {
     ? Math.max(Number(existing.best_score ?? 0), score)
     : score;
 
-  // 2) зберігаємо last_score + best_score
+  // 2) upsert у game_scores
+  const payload: {
+    id?: number;
+    user_id: number;
+    game_key: string;
+    last_score: number;
+    best_score: number;
+  } = {
+    user_id: userId,
+    game_key: gameKey,
+    last_score: score,
+    best_score: bestScore,
+  };
+
+  if (existing?.id) {
+    payload.id = existing.id;
+  }
+
   const { error: upsertError } = await supabase
     .from("game_scores")
-    .upsert(
-      {
-        id: existing?.id, // якщо вже існує — оновимо
-        user_id: userId,
-        game_key: gameKey,
-        last_score: score,
-        best_score: bestScore,
-      },
-      { onConflict: "user_id,game_key" }
-    );
+    .upsert(payload, { onConflict: "user_id,game_key" });
 
   if (upsertError) {
     console.error("submitFlappyScoreToBackend upsert error:", upsertError);
   }
 
-  // 3) оновлюємо XP та статистику профілю
-  const { error: rpcError } = await supabase.rpc("increment_profile_stats", {
-    p_user_id: userId,
-    p_xp_delta: xpDelta,
-    p_score_delta: score,
-  });
+  // 3) оновлюємо XP та статистику через RPC
+  if (xpDelta > 0) {
+    const { error: rpcError } = await supabase.rpc("increment_profile_stats", {
+      p_user_id: userId,
+      p_xp_delta: xpDelta,
+      p_score_delta: score,
+    });
 
-  if (rpcError) {
-    console.error("submitFlappyScoreToBackend rpc error:", rpcError);
+    if (rpcError) {
+      console.error("submitFlappyScoreToBackend rpc error:", rpcError);
+    }
   }
 
   // 4) повертаємо оновлений профіль

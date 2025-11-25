@@ -135,36 +135,38 @@ function App() {
   const { level, progress, nextLevelXp } = calcLevel(xp);
 
   // викликається, коли Flappy закінчує гру
-  const handleGameOver = async (sessionScore: number) => {
-    const gainedXp = sessionScore * 10;
+ const handleGameOver = async (sessionScore: number) => {
+  const gainedXp = sessionScore * 10;
 
-    // локально зберігаємо найкращий score цього юзера в Flappy Coin
-    addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
+  // локально зберігаємо найкращий score цього юзера в Flappy Coin (для локального лідерборду)
+  addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
 
-    if (gainedXp > 0) {
-      // оптимістично оновлюємо XP в UI
-      setXp((prev) => prev + gainedXp);
-      setLastGain(gainedXp);
-    }
+  if (gainedXp > 0) {
+    // оптимістично оновлюємо XP в UI
+    setXp((prev) => prev + gainedXp);
+    setLastGain(gainedXp);
+  }
 
-    // оновлюємо бекенд, якщо є userId
-    if (userId && userId > 0) {
-      try {
-        const updated = await submitFlappyScoreToBackend({
-          userId,
-          score: sessionScore,
-          xpDelta: gainedXp,
-          gameKey: "flappy_coin",
-        });
+  // оновлюємо бекенд, якщо є userId з Supabase
+  if (userId && userId > 0) {
+    try {
+      const updated = await submitFlappyScoreToBackend({
+        userId,
+        score: sessionScore,
+        xpDelta: gainedXp,
+        gameKey: "flappy_coin",
+      });
 
-        if (updated) {
-          setXp(updated.xp); // синхронізуємося з тим, що в базі
-        }
-      } catch (e) {
-        console.error("submitFlappyScoreToBackend error:", e);
+      if (updated) {
+        // синхронізуємо XP з тим, що в базі (важливо для аірдропа)
+        setXp(updated.xp);
       }
+    } catch (e) {
+      console.error("submitFlappyScoreToBackend error:", e);
     }
-  };
+  }
+};
+
 
   // ===== ЕКРАНИ =====
 
