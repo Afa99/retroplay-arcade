@@ -14,10 +14,10 @@ interface FlappyProps {
   onGameOver?: (score: number) => void;
 }
 
-// Трохи спокійніші значення
-const GRAVITY = 0.45;      // було 0.55
-const JUMP_FORCE = -8.5;   // було -9.5
-const PIPE_SPEED = 2.0;    // було 2.6
+// Плавна фізика → як справжній Flappy Bird
+const GRAVITY = 0.42;
+const JUMP_FORCE = -8.5;
+const PIPE_SPEED = 1.8;
 
 const BEST_KEY = "flappyBestScore";
 
@@ -32,7 +32,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
   const [bestScore, setBestScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
 
-  // Завантажуємо bestScore
+  // Завантажуємо bestScore з localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(BEST_KEY);
@@ -43,9 +43,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
           gameRef.current.bestScore = val;
         }
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   const startNewGame = () => {
@@ -87,8 +85,8 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
   const drawScene = (ctx: CanvasRenderingContext2D, game: GameState) => {
     ctx.imageSmoothingEnabled = false;
 
-    // фон на весь канвас
-    ctx.fillStyle = "#03050f";
+    // фон
+    ctx.fillStyle = "#02040a";
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     // труби
@@ -103,7 +101,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       );
     }
 
-    // монетка
+    // монетка-пташка
     ctx.beginPath();
     ctx.arc(game.bird.x, game.bird.y, game.bird.radius, 0, Math.PI * 2);
     ctx.fillStyle = "#ffd84a";
@@ -112,15 +110,15 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     ctx.stroke();
     ctx.closePath();
 
+    // ₿ на монетці
     ctx.fillStyle = "#663300";
     ctx.font = "13px Courier New";
     ctx.textAlign = "center";
     ctx.fillText("₿", game.bird.x, game.bird.y + 1);
 
-    // текст у центрі (інфа по старту/рестарту)
+    // початок / рестарт
     ctx.fillStyle = "#fff";
     ctx.font = "16px Courier New";
-    ctx.textAlign = "center";
 
     if (!game.isRunning && !game.gameOver) {
       ctx.fillText("Tap to start", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
@@ -130,14 +128,11 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       ctx.fillStyle = "#ff6666";
       ctx.fillText("GAME OVER", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
       ctx.fillStyle = "#fff";
-      ctx.fillText(
-        "Tap to restart",
-        CANVAS_WIDTH / 2,
-        CANVAS_HEIGHT / 2 + 22
-      );
+      ctx.fillText("Tap to restart", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
     }
   };
 
+  // Основний геймлуп
   const gameLoop = (timestamp: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -147,7 +142,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     const game = gameRef.current;
 
     const last = lastTimeRef.current ?? timestamp;
-    let delta = (timestamp - last) / (1000 / 60);
+    let delta = (timestamp - last) / (1000 / 60); // нормалізація до FPS
     if (delta > 2) delta = 2;
     lastTimeRef.current = timestamp;
 
@@ -188,9 +183,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
             setBestScore(game.bestScore);
             try {
               localStorage.setItem(BEST_KEY, String(game.bestScore));
-            } catch {
-              // ignore
-            }
+            } catch {}
           }
         }
       }
@@ -201,7 +194,7 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     animationRef.current = requestAnimationFrame(gameLoop);
   };
 
-  // init canvas
+  // Ініціалізація канвасу + старт циклу
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -217,7 +210,6 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // tap / click
@@ -237,27 +229,6 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
       canvas.removeEventListener("click", tap);
       canvas.removeEventListener("touchstart", tap);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // пауза при приховуванні
-  useEffect(() => {
-    const onVis = () => {
-      if (document.hidden) {
-        if (animationRef.current) {
-          cancelAnimationFrame(animationRef.current);
-          animationRef.current = null;
-        }
-      } else {
-        if (!animationRef.current) {
-          lastTimeRef.current = null;
-          animationRef.current = requestAnimationFrame(gameLoop);
-        }
-      }
-    };
-
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
   return (
@@ -268,10 +239,8 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
         height: "100vh",
         background: "#000",
         overflow: "hidden",
-        fontFamily: "Courier New, monospace",
       }}
     >
-      {/* CANVAS НА ВЕСЬ ЕКРАН */}
       <canvas
         ref={canvasRef}
         style={{
@@ -279,77 +248,74 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
           inset: 0,
           width: "100%",
           height: "100%",
-          touchAction: "none",
           display: "block",
+          touchAction: "none",
         }}
       />
 
-      {/* SCORE / BEST ЗВЕРХУ */}
+      {/* SCORE BAR */}
       <div
         style={{
           position: "absolute",
-          top: 8,
+          top: 10,
           left: "50%",
           transform: "translateX(-50%)",
-          color: "#fff",
-          fontSize: 14,
           background: "rgba(0,0,0,0.35)",
-          padding: "4px 10px",
+          padding: "6px 16px",
           borderRadius: 999,
           border: "1px solid rgba(255,255,255,0.2)",
+          color: "#fff",
+          fontSize: 14,
+          fontFamily: "Courier New",
         }}
       >
         Score: {score} · Best: {bestScore}
       </div>
 
-      {/* ДВІ КНОПКИ ПІСЛЯ ПРОГРАШУ */}
+      {/* КНОПКИ після програшу */}
       {gameOver && (
         <div
           style={{
             position: "absolute",
-            bottom: 24,
+            bottom: 25,
             left: "50%",
             transform: "translateX(-50%)",
             display: "flex",
-            gap: 10,
-            padding: "0 16px",
-            width: "100%",
+            gap: 12,
+            width: "90%",
             maxWidth: 420,
-            boxSizing: "border-box",
-            justifyContent: "center",
           }}
         >
           <button
             onClick={startNewGame}
             style={{
               flex: 1,
-              padding: "10px 14px",
+              padding: "12px 14px",
               borderRadius: 999,
               border: "none",
-              cursor: "pointer",
-              background: "#28a745",
-              color: "#fff",
-              fontWeight: 600,
-              fontSize: 14,
+              background: "#2ecc71",
+              color: "#000",
+              fontWeight: 700,
+              fontSize: 15,
             }}
           >
-            🔁 Рестарт
+            🔁 Restart
           </button>
+
           <button
             onClick={onExit}
             style={{
               flex: 1,
-              padding: "10px 14px",
+              padding: "12px 14px",
               borderRadius: 999,
               border: "none",
-              cursor: "pointer",
-              background: "#444",
+              background: "#555",
               color: "#fff",
-              fontWeight: 600,
-              fontSize: 14,
+              fontWeight: 700,
+              fontSize: 15,
             }}
           >
-            ⬅ В меню
+            ⬅ Menu
           </button>
         </div>
       )}

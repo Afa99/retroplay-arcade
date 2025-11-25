@@ -5,6 +5,11 @@ import { LeaderboardScreen } from "./screens/LeaderboardScreen";
 import { VipTournamentsScreen } from "./screens/VipTournamentsScreen";
 import { FlappyHubScreen } from "./screens/FlappyHubScreen";
 import { addScoreToLeaderboard } from "./leaderboard/storage";
+import {
+  syncUserWithBackend,
+  submitFlappyScoreToBackend,
+  type BackendProfile,
+} from "./api/backend";
 
 type Screen = "menu" | "flappyHub" | "flappyPlay" | "flappyLeaderboard" | "vip";
 
@@ -65,7 +70,13 @@ function App() {
   const [xp, setXp] = useState(0);
   const [lastGain, setLastGain] = useState(0);
 
-  // завантажуємо XP з localStorage для цього telegramUserId
+  const [backendProfile, setBackendProfile] = useState<BackendProfile | null>(
+    null
+  );
+  const [userId, setUserId] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // 1) локальний XP (кеш) – читаємо з localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -82,7 +93,7 @@ function App() {
     }
   }, [XP_KEY]);
 
-  // зберігаємо XP
+  // 2) при зміні XP — пишемо в localStorage (кеш)
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -93,43 +104,76 @@ function App() {
     }
   }, [xp, XP_KEY]);
 
+  // 3) синхронізація з бекендом (Supabase)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function sync() {
+      setSyncing(true);
+      try {
+        const { userId, profile: backend } = await syncUserWithBackend({
+          telegramId: profile.id,
+          name: profile.name,
+        });
+
+        if (cancelled) return;
+
+        setUserId(userId);
+        setBackendProfile(backend);
+
+        // бекенд → основне джерело XP
+        setXp(backend.xp);
+      } catch (e) {
+        console.error("Backend sync error:", e);
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    }
+
+    sync();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id, profile.name]);
+
   const { level, progress, nextLevelXp } = calcLevel(xp);
 
   // викликається, коли Flappy закінчує гру
-  const handleGameOver = (sessionScore: number) => {
+  const handleGameOver = async (sessionScore: number) => {
     const gainedXp = sessionScore * 10;
 
     // локально зберігаємо найкращий score цього юзера в Flappy Coin
     addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
 
-    // 🔗 ТУТ У МАЙБУТНЬОМУ: виклик бекенду, щоб:
-    // 1) оновити глобальний XP
-    // 2) оновити глобальний лідерборд по грі
-    //
-    // приклад:
-    // fetch("/api/score", {
-    //   method: "POST",
-    //   headers: { "Content-Type": "application/json" },
-    //   body: JSON.stringify({
-    //     telegramUserId: profile.id,
-    //     name: profile.name,
-    //     game: "flappy_coin",
-    //     score: sessionScore,
-    //   }),
-    // }).catch(() => {});
-
-    if (gainedXp <= 0) {
-      // гра закінчилась, але XP не додаємо
-      return;
+    if (gainedXp > 0) {
+      // оптимістично оновлюємо XP в UI
+      setXp((prev) => prev + gainedXp);
+      setLastGain(gainedXp);
     }
 
-    setXp((prev) => prev + gainedXp);
-    setLastGain(gainedXp);
+    // оновлюємо бекенд, якщо є userId
+    if (userId && userId > 0) {
+      try {
+        const updated = await submitFlappyScoreToBackend({
+          userId,
+          score: sessionScore,
+          xpDelta: gainedXp,
+          gameKey: "flappy_coin",
+        });
 
-    // не переходимо в меню — Flappy сам покаже Game Over і дасть рестарт по tap
+        if (updated) {
+          setBackendProfile(updated);
+          setXp(updated.xp); // синхронізуємося з тим, що в базі
+        }
+      } catch (e) {
+        console.error("submitFlappyScoreToBackend error:", e);
+      }
+    }
   };
 
-  // екрани
+  // ===== ЕКРАНИ =====
+
   if (screen === "flappyPlay") {
     return (
       <FlappyScreen
@@ -145,6 +189,7 @@ function App() {
         onBack={() => setScreen("flappyHub")}
         gameKey="flappy_coin"
         gameTitle="Flappy Coin"
+        currentTelegramId={profile.id}
       />
     );
   }
@@ -163,7 +208,7 @@ function App() {
     return <VipTournamentsScreen onBack={() => setScreen("menu")} />;
   }
 
-  // ==== ГОЛОВНА (MENU) З XP-ЛІДЕРБОРДОМ ====
+  // ==== ГОЛОВНА (MENU) З XP / ПРОФІЛЕМ ====
   return (
     <div
       style={{
@@ -208,8 +253,7 @@ function App() {
                 width: 42,
                 height: 42,
                 borderRadius: "50%",
-                background:
-                  "linear-gradient(135deg, #ffcc00, #ff8800)",
+                background: "linear-gradient(135deg, #ffcc00, #ff8800)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -239,6 +283,7 @@ function App() {
               }}
             >
               Level {level} · {xp} XP
+              {syncing && " · syncing..."}
             </div>
           </div>
         </div>
@@ -295,8 +340,7 @@ function App() {
             style={{
               width: `${progress * 100}%`,
               height: "100%",
-              background:
-                "linear-gradient(90deg, #5bff9c, #00ffcc)",
+              background: "linear-gradient(90deg, #5bff9c, #00ffcc)",
               transition: "width 0.3s ease-out",
             }}
           />
@@ -317,7 +361,7 @@ function App() {
         </div>
       </div>
 
-      {/* GLOBAL XP LEADERBOARD PREVIEW */}
+      {/* GLOBAL XP PREVIEW */}
       <div
         style={{
           width: "100%",
@@ -332,7 +376,7 @@ function App() {
             color: "#ffcc33",
           }}
         >
-          🏆 Global XP Leaderboard (prototype)
+          🏆 Global XP Leaderboard (preview)
         </div>
         <div
           style={{
@@ -382,7 +426,7 @@ function App() {
                     opacity: 0.75,
                   }}
                 >
-                  Your current XP
+                  Your current XP (stored in cloud)
                 </div>
               </div>
             </div>
@@ -404,8 +448,8 @@ function App() {
             marginTop: 4,
           }}
         >
-          For now this board shows only you. Once we add backend, this will be a
-          real global XP ranking between all Telegram players.
+          Now XP is stored in Supabase. Later this block will show real global
+          ranking between all players.
         </div>
       </div>
 

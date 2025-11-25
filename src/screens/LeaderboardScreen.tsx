@@ -1,70 +1,124 @@
 import { useEffect, useState } from "react";
-import {
-  loadLeaderboardForGame,
-  type LeaderboardEntry,
-} from "../leaderboard/storage";
+import { supabase } from "../lib/supabaseClient";
+
+interface LeaderboardEntry {
+  telegramId: string;
+  username: string | null;
+  bestScore: number;
+  lastScore: number;
+}
 
 interface LeaderboardScreenProps {
   onBack: () => void;
-  gameKey: string;   // "flappy_coin"
-  gameTitle: string; // "Flappy Coin"
+  gameKey: string;
+  gameTitle: string;
+  currentTelegramId?: string;
 }
 
 export function LeaderboardScreen({
   onBack,
   gameKey,
   gameTitle,
+  currentTelegramId,
 }: LeaderboardScreenProps) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    setEntries(loadLeaderboardForGame(gameKey));
+    let cancelled = false;
+
+    async function loadLeaderboard() {
+      setLoading(true);
+      setErrorMsg(null);
+
+      const { data, error } = await supabase
+        .from("game_scores")
+        .select(
+          `
+          best_score,
+          last_score,
+          users (
+            telegram_id,
+            username
+          )
+        `
+        )
+        .eq("game_key", gameKey)
+        .order("best_score", { ascending: false })
+        .limit(50);
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Leaderboard error:", error);
+        setErrorMsg("Не вдалося завантажити лідерборд");
+        setLoading(false);
+        return;
+      }
+
+      const formatted: LeaderboardEntry[] = (data ?? []).map((row: any) => ({
+        bestScore: row.best_score ?? 0,
+        lastScore: row.last_score ?? 0,
+        telegramId: row.users?.telegram_id ?? "",
+        username: row.users?.username ?? null,
+      }));
+
+      setEntries(formatted);
+      setLoading(false);
+    }
+
+    loadLeaderboard();
+
+    return () => {
+      cancelled = true;
+    };
   }, [gameKey]);
 
   return (
     <div
       style={{
-        height: "100vh",
-        background: "radial-gradient(circle at top, #151626, #050509)",
-        color: "white",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
+        minHeight: "100vh",
+        background: "radial-gradient(circle at top, #252641, #050509)",
+        color: "#fff",
         padding: "16px",
         fontFamily: "Courier New, monospace",
       }}
     >
+      {/* Header */}
       <div
         style={{
           width: "100%",
           maxWidth: 420,
+          margin: "0 auto 16px",
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: 16,
+          justifyContent: "space-between",
         }}
       >
         <button
           onClick={onBack}
           style={{
-            padding: "6px 12px",
+            padding: "8px 12px",
+            borderRadius: 999,
+            border: "none",
             background: "#444",
             color: "#fff",
-            borderRadius: 6,
-            border: "none",
+            fontSize: 13,
             cursor: "pointer",
           }}
         >
-          ⬅ Back
+          ⬅ Назад
         </button>
+
         <div
           style={{
-            fontSize: 16,
-            fontWeight: 600,
-            color: "#5bff9c",
+            textAlign: "right",
+            fontSize: 11,
+            opacity: 0.8,
           }}
         >
-          {gameTitle} — Leaderboard
+          Global leaderboard
         </div>
       </div>
 
@@ -72,123 +126,149 @@ export function LeaderboardScreen({
         style={{
           width: "100%",
           maxWidth: 420,
-          background: "rgba(0,0,0,0.5)",
-          borderRadius: 12,
-          border: "1px solid rgba(255,255,255,0.12)",
-          padding: "10px 12px",
-          fontSize: 12,
+          margin: "0 auto",
+          textAlign: "center",
         }}
       >
-        {entries.length === 0 ? (
-          <div
-            style={{
-              textAlign: "center",
-              opacity: 0.7,
-              padding: "16px 0",
-            }}
-          >
-            No scores yet. Play {gameTitle} and set the first record!
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            {entries.map((entry, index) => {
-              const date = new Date(entry.updatedAt);
-              const dateLabel = date.toLocaleDateString(undefined, {
-                day: "2-digit",
-                month: "2-digit",
-              });
+        <h2
+          style={{
+            fontSize: 22,
+            marginBottom: 4,
+            background: "linear-gradient(90deg, #ffcc00, #ffaa00)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+          }}
+        >
+          🏆 {gameTitle}
+        </h2>
+        <p
+          style={{
+            fontSize: 12,
+            opacity: 0.8,
+            marginBottom: 16,
+          }}
+        >
+          Top гравців за найкращим результатом
+        </p>
+      </div>
 
-              const isTop1 = index === 0;
-              const isTop3 = index < 3;
+      {loading && (
+        <p style={{ textAlign: "center", fontSize: 13, opacity: 0.8 }}>
+          Завантаження...
+        </p>
+      )}
 
-              return (
+      {!loading && errorMsg && (
+        <p style={{ textAlign: "center", fontSize: 13, color: "#ff7777" }}>
+          {errorMsg}
+        </p>
+      )}
+
+      {!loading && !errorMsg && entries.length === 0 && (
+        <p style={{ textAlign: "center", fontSize: 13, opacity: 0.8 }}>
+          Ще ніхто не грав у цю гру. Будь першим! 🚀
+        </p>
+      )}
+
+      {!loading && !errorMsg && entries.length > 0 && (
+        <div
+          style={{
+            width: "100%",
+            maxWidth: 420,
+            margin: "0 auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            marginTop: 8,
+          }}
+        >
+          {entries.map((entry, index) => {
+            const isYou = currentTelegramId &&
+              entry.telegramId === currentTelegramId;
+
+            const place = index + 1;
+
+            return (
+              <div
+                key={`${entry.telegramId}-${index}`}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: isYou
+                    ? "rgba(255, 224, 100, 0.12)"
+                    : "rgba(0,0,0,0.45)",
+                  border: isYou
+                    ? "1px solid rgba(255, 224, 100, 0.7)"
+                    : "1px solid rgba(255,255,255,0.08)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                }}
+              >
                 <div
-                  key={`${entry.userId}-${entry.gameKey}-${index}`}
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "6px 8px",
-                    borderRadius: 8,
-                    background: isTop1
-                      ? "linear-gradient(90deg, rgba(255,204,0,0.15), rgba(255,136,0,0.05))"
-                      : "rgba(255,255,255,0.03)",
-                    border: isTop3
-                      ? "1px solid rgba(255,204,0,0.5)"
-                      : "1px solid rgba(255,255,255,0.06)",
+                    gap: 10,
                   }}
                 >
                   <div
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
+                      width: 26,
+                      textAlign: "right",
+                      fontWeight: 700,
+                      color:
+                        place === 1
+                          ? "#ffd700"
+                          : place === 2
+                          ? "#c0c0c0"
+                          : place === 3
+                          ? "#cd7f32"
+                          : "#ffcc66",
                     }}
                   >
+                    #{place}
+                  </div>
+                  <div>
                     <div
                       style={{
-                        width: 22,
-                        textAlign: "right",
-                        fontWeight: isTop3 ? 700 : 500,
-                        color: isTop3 ? "#ffcc33" : "#ddd",
+                        fontWeight: 600,
+                        fontSize: 13,
                       }}
                     >
-                      #{index + 1}
+                      {entry.username || "Player"}
+                      {isYou && (
+                        <span style={{ color: "#5bff9c", marginLeft: 6 }}>
+                          (you)
+                        </span>
+                      )}
                     </div>
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 13,
-                          fontWeight: isTop3 ? 600 : 500,
-                        }}
-                      >
-                        {entry.name}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          opacity: 0.75,
-                        }}
-                      >
-                        {dateLabel}
-                      </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        opacity: 0.75,
+                      }}
+                    >
+                      Best: {entry.bestScore} · Last: {entry.lastScore}
                     </div>
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: isTop3 ? "#5bff9c" : "#ffffff",
-                    }}
-                  >
-                    {entry.score}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
-      <div
-        style={{
-          marginTop: 12,
-          fontSize: 11,
-          opacity: 0.65,
-          textAlign: "center",
-          maxWidth: 420,
-        }}
-      >
-        Each player is shown once with their best score in this game. Later
-        we&apos;ll sync this globally between all Telegram users via backend.
-      </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#5bff9c",
+                  }}
+                >
+                  {entry.bestScore}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
