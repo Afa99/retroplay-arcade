@@ -16,8 +16,8 @@ interface FlappyProps {
 
 // 🔧 ФІЗИКА — трішки легше для Telegram
 // Було: GRAVITY = 0.42; JUMP_FORCE = -8.5
-const GRAVITY = 0.32;
-const JUMP_FORCE = -7.5; // слабший стрибок ~ -10%
+const GRAVITY = 0.30;
+const JUMP_FORCE = -7.0; // слабший стрибок ~ -10%
 const PIPE_SPEED = 1.8;
 
 const BEST_KEY = "flappyBestScore";
