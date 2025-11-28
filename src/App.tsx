@@ -10,7 +10,12 @@ import {
   submitFlappyScoreToBackend,
 } from "./api/backend";
 
-type Screen = "menu" | "flappyHub" | "flappyPlay" | "flappyLeaderboard" | "vip";
+type Screen =
+  | "menu"
+  | "flappyHub"
+  | "flappyPlay"
+  | "flappyLeaderboard"
+  | "vip";
 
 interface ProfileInfo {
   id: string;
@@ -63,7 +68,6 @@ function calcLevel(xp: number) {
 
 function App() {
   const profile = getProfileFromTelegram();
-  const XP_KEY = `retroplay_xp_${profile.id}`;
 
   const [screen, setScreen] = useState<Screen>("menu");
   const [xp, setXp] = useState(0);
@@ -72,41 +76,25 @@ function App() {
   const [userId, setUserId] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  // 1) локальний XP (кеш) – читаємо з localStorage
+  // Telegram WebApp init
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = window.localStorage.getItem(XP_KEY);
-        if (saved) {
-          const val = Number(saved);
-          if (!Number.isNaN(val) && val >= 0) {
-            setXp(val);
-          }
-        }
-      } catch {
-        // ignore
-      }
+    try {
+      WebApp.ready();
+      WebApp.expand();
+      console.log("[App] Telegram WebApp ready");
+    } catch (e) {
+      console.log("[App] WebApp ready error or not in Telegram:", e);
     }
-  }, [XP_KEY]);
+  }, []);
 
-  // 2) при зміні XP — пишемо в localStorage (кеш)
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(XP_KEY, String(xp));
-      } catch {
-        // ignore
-      }
-    }
-  }, [xp, XP_KEY]);
-
-  // 3) синхронізація з бекендом (Supabase)
+  // 1) синхронізація з бекендом (Supabase)
   useEffect(() => {
     let cancelled = false;
 
     async function sync() {
       setSyncing(true);
       try {
+        console.log("[App] syncUserWithBackend call for", profile);
         const { userId, profile: backend } = await syncUserWithBackend({
           telegramId: profile.id,
           name: profile.name,
@@ -115,11 +103,10 @@ function App() {
         if (cancelled) return;
 
         setUserId(userId);
-
-        // бекенд → основне джерело XP
-        setXp(backend?.xp ?? 0);
+        setXp(backend.xp);
+        console.log("[App] sync done, userId:", userId, "xp:", backend.xp);
       } catch (e) {
-        console.error("Backend sync error:", e);
+        console.error("[App] Backend sync error:", e);
       } finally {
         if (!cancelled) setSyncing(false);
       }
@@ -134,21 +121,26 @@ function App() {
 
   const { level, progress, nextLevelXp } = calcLevel(xp);
 
-  // викликається, коли Flappy закінчує гру
- const handleGameOver = async (sessionScore: number) => {
-  const gainedXp = sessionScore * 10;
+  // 2) викликається, коли Flappy закінчує гру
+  const handleGameOver = async (sessionScore: number) => {
+    console.log("[App] handleGameOver, score:", sessionScore);
 
-  // локально зберігаємо найкращий score цього юзера в Flappy Coin (для локального лідерборду)
-  addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
+    const gainedXp = sessionScore * 10;
 
-  if (gainedXp > 0) {
-    // оптимістично оновлюємо XP в UI
-    setXp((prev) => prev + gainedXp);
-    setLastGain(gainedXp);
-  }
+    // локальний лідерборд (тільки для клієнта)
+    addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
 
-  // оновлюємо бекенд, якщо є userId з Supabase
-  if (userId && userId > 0) {
+    // оптимістичне +XP (щоб ти бачив приріст миттєво)
+    if (gainedXp > 0) {
+      setXp((prev) => prev + gainedXp);
+      setLastGain(gainedXp);
+    }
+
+    if (!userId || userId <= 0) {
+      console.warn("[App] no userId yet, skip backend update");
+      return;
+    }
+
     try {
       const updated = await submitFlappyScoreToBackend({
         userId,
@@ -158,15 +150,15 @@ function App() {
       });
 
       if (updated) {
-        // синхронізуємо XP з тим, що в базі (важливо для аірдропа)
-        setXp(updated.xp);
+        console.log("[App] backend updated profile:", updated);
+        setXp(updated.xp); // вирівнюємо XP з тим, що в базі
+      } else {
+        console.warn("[App] submitFlappyScoreToBackend returned null");
       }
     } catch (e) {
-      console.error("submitFlappyScoreToBackend error:", e);
+      console.error("[App] submitFlappyScoreToBackend error:", e);
     }
-  }
-};
-
+  };
 
   // ===== ЕКРАНИ =====
 

@@ -8,7 +8,7 @@ export interface BackendProfile {
 }
 
 /**
- * Синхронізація Telegram-користувача з таблицями users + profiles.
+ * Стягуємо/створюємо user + profile.
  */
 export async function syncUserWithBackend(params: {
   telegramId: string;
@@ -21,6 +21,13 @@ export async function syncUserWithBackend(params: {
   const username = tgUser?.username ?? name ?? "Player";
   const first_name = tgUser?.first_name ?? null;
   const last_name = tgUser?.last_name ?? null;
+
+  console.log("[backend] syncUserWithBackend start", {
+    telegramId,
+    username,
+    first_name,
+    last_name,
+  });
 
   // 1) upsert у users
   const { data: userRow, error: userError } = await supabase
@@ -38,8 +45,7 @@ export async function syncUserWithBackend(params: {
     .single();
 
   if (userError || !userRow) {
-    console.error("syncUserWithBackend users error:", userError);
-    // хай хоч застосунок лишається живим
+    console.error("[backend] users upsert error:", userError);
     return {
       userId: 0,
       profile: { xp: 0, total_games: 0, total_score: 0 },
@@ -47,50 +53,60 @@ export async function syncUserWithBackend(params: {
   }
 
   const userId = Number(userRow.id);
+  console.log("[backend] userId:", userId);
 
-  // 2) гарантуємо, що профіль існує
-  const { error: profileUpsertError } = await supabase
-    .from("profiles")
-    .upsert({ user_id: userId }, { onConflict: "user_id" });
-
-  if (profileUpsertError) {
-    console.error(
-      "syncUserWithBackend profiles upsert error:",
-      profileUpsertError
-    );
-  }
-
-  // 3) читаємо профіль
-  const { data: profileRow, error: profileSelectError } = await supabase
+  // 2) читаємо профіль
+  const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
     .select("xp,total_games,total_score")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
 
-  if (profileSelectError || !profileRow) {
-    console.error(
-      "syncUserWithBackend profiles select error:",
-      profileSelectError
-    );
-    return {
-      userId,
-      profile: { xp: 0, total_games: 0, total_score: 0 },
-    };
+  let profile: BackendProfile = {
+    xp: 0,
+    total_games: 0,
+    total_score: 0,
+  };
+
+  if (profileError) {
+    console.error("[backend] profiles select error:", profileError);
   }
 
-  return {
-    userId,
-    profile: {
+  if (profileRow) {
+    profile = {
       xp: Number(profileRow.xp ?? 0),
       total_games: Number(profileRow.total_games ?? 0),
       total_score: Number(profileRow.total_score ?? 0),
-    },
+    };
+  } else {
+    // якщо профіля нема — створюємо
+    const { data: inserted, error: insertError } = await supabase
+      .from("profiles")
+      .insert({ user_id: userId, xp: 0, total_games: 0, total_score: 0 })
+      .select("xp,total_games,total_score")
+      .single();
+
+    if (insertError || !inserted) {
+      console.error("[backend] profiles insert error:", insertError);
+    } else {
+      profile = {
+        xp: Number(inserted.xp ?? 0),
+        total_games: Number(inserted.total_games ?? 0),
+        total_score: Number(inserted.total_score ?? 0),
+      };
+    }
+  }
+
+  console.log("[backend] profile loaded:", profile);
+
+  return {
+    userId,
+    profile,
   };
 }
 
 /**
- * Запис результату по грі + оновлення XP.
- * Працює для будь-якої гри з певним gameKey (наприклад 'flappy_coin').
+ * Записуємо результат по грі + оновлюємо профіль (xp, total_games, total_score).
  */
 export async function submitFlappyScoreToBackend(params: {
   userId: number;
@@ -100,84 +116,100 @@ export async function submitFlappyScoreToBackend(params: {
 }): Promise<BackendProfile | null> {
   const { userId, score, xpDelta, gameKey } = params;
 
+  console.log("[backend] submitFlappyScoreToBackend start:", {
+    userId,
+    score,
+    xpDelta,
+    gameKey,
+  });
+
   if (!userId || userId <= 0) {
-    // немає валідного юзера в базі
+    console.warn("[backend] invalid userId, skip");
     return null;
   }
 
-  // 1) читаємо попередній рекорд
-  const { data: existing, error: selectError } = await supabase
+  // 1) читаємо поточний профіль
+  const { data: profileRow, error: profileError } = await supabase
+    .from("profiles")
+    .select("xp,total_games,total_score")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  let currentXp = 0;
+  let currentGames = 0;
+  let currentTotalScore = 0;
+
+  if (profileError) {
+    console.error("[backend] profiles select error:", profileError);
+  }
+
+  if (profileRow) {
+    currentXp = Number(profileRow.xp ?? 0);
+    currentGames = Number(profileRow.total_games ?? 0);
+    currentTotalScore = Number(profileRow.total_score ?? 0);
+  }
+
+  const newProfile: BackendProfile = {
+    xp: currentXp + xpDelta,
+    total_games: currentGames + 1,
+    total_score: currentTotalScore + score,
+  };
+
+  // 2) upsert профілю
+  const { error: profileUpsertError } = await supabase
+    .from("profiles")
+    .upsert(
+      {
+        user_id: userId,
+        xp: newProfile.xp,
+        total_games: newProfile.total_games,
+        total_score: newProfile.total_score,
+      },
+      { onConflict: "user_id" }
+    );
+
+  if (profileUpsertError) {
+    console.error("[backend] profiles upsert error:", profileUpsertError);
+  } else {
+    console.log("[backend] profiles upsert OK");
+  }
+
+  // 3) game_scores — best_score / last_score
+   // 3) game_scores — best_score / last_score
+  const { data: existingScoreRow, error: scoreSelectError } = await supabase
     .from("game_scores")
-    .select("id,best_score")
+    .select("best_score")
     .eq("user_id", userId)
     .eq("game_key", gameKey)
     .maybeSingle();
 
-  if (selectError) {
-    console.error("submitFlappyScoreToBackend select error:", selectError);
+  if (scoreSelectError) {
+    console.error("[backend] game_scores select error:", scoreSelectError);
   }
 
-  const bestScore = existing
-    ? Math.max(Number(existing.best_score ?? 0), score)
+  const bestScore = existingScoreRow
+    ? Math.max(Number(existingScoreRow.best_score ?? 0), score)
     : score;
 
-  // 2) upsert у game_scores
-  const payload: {
-    id?: number;
-    user_id: number;
-    game_key: string;
-    last_score: number;
-    best_score: number;
-  } = {
-    user_id: userId,
-    game_key: gameKey,
-    last_score: score,
-    best_score: bestScore,
-  };
-
-  if (existing?.id) {
-    payload.id = existing.id;
-  }
-
-  const { error: upsertError } = await supabase
+  const { error: scoreUpsertError } = await supabase
     .from("game_scores")
-    .upsert(payload, { onConflict: "user_id,game_key" });
-
-  if (upsertError) {
-    console.error("submitFlappyScoreToBackend upsert error:", upsertError);
-  }
-
-  // 3) оновлюємо XP та статистику через RPC
-  if (xpDelta > 0) {
-    const { error: rpcError } = await supabase.rpc("increment_profile_stats", {
-      p_user_id: userId,
-      p_xp_delta: xpDelta,
-      p_score_delta: score,
-    });
-
-    if (rpcError) {
-      console.error("submitFlappyScoreToBackend rpc error:", rpcError);
-    }
-  }
-
-  // 4) повертаємо оновлений профіль
-  const { data: profileRow, error: profileSelectError } = await supabase
-    .from("profiles")
-    .select("xp,total_games,total_score")
-    .eq("user_id", userId)
-    .single();
-
-  if (profileSelectError || !profileRow) {
-    console.error(
-      "submitFlappyScoreToBackend profile select error:",
-      profileSelectError
+    .upsert(
+      {
+        user_id: userId,
+        game_key: gameKey,
+        last_score: score,
+        best_score: bestScore,
+      },
+      { onConflict: "user_id,game_key" }
     );
-    return null;
+
+  if (scoreUpsertError) {
+    console.error("[backend] game_scores upsert error:", scoreUpsertError);
+  } else {
+    console.log("[backend] game_scores upsert OK");
   }
 
-  return {
-    xp: Number(profileRow.xp ?? 0),
-    total_games: Number(profileRow.total_games ?? 0),
-    total_score: Number(profileRow.total_score ?? 0),
-  };
+  console.log("[backend] profile after game:", newProfile);
+
+  return newProfile;
 }

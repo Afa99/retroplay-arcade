@@ -14,9 +14,10 @@ interface FlappyProps {
   onGameOver?: (score: number) => void;
 }
 
-// Плавна фізика → як справжній Flappy Bird
-const GRAVITY = 0.42;
-const JUMP_FORCE = -8.5;
+// 🔧 ФІЗИКА — трішки легше для Telegram
+// Було: GRAVITY = 0.42; JUMP_FORCE = -8.5
+const GRAVITY = 0.32;
+const JUMP_FORCE = -7.5; // слабший стрибок ~ -10%
 const PIPE_SPEED = 1.8;
 
 const BEST_KEY = "flappyBestScore";
@@ -79,7 +80,10 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     game.isRunning = false;
     setGameOver(true);
 
-    if (onGameOver) onGameOver(game.score);
+    if (onGameOver) {
+      console.log("[Flappy] onGameOver → score:", game.score);
+      onGameOver(game.score);
+    }
   };
 
   const drawScene = (ctx: CanvasRenderingContext2D, game: GameState) => {
@@ -147,9 +151,11 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
     lastTimeRef.current = timestamp;
 
     if (game.isRunning && !game.gameOver) {
+      // фізика
       game.bird.velocity += GRAVITY * delta;
       game.bird.y += game.bird.velocity * delta;
 
+      // зіткнення з землею/стелею
       if (game.bird.y + game.bird.radius >= CANVAS_HEIGHT) {
         game.bird.y = CANVAS_HEIGHT - game.bird.radius;
         endGame();
@@ -159,15 +165,18 @@ export function Flappy({ onExit, onGameOver }: FlappyProps) {
         endGame();
       }
 
+      // рух труб
       for (let pipe of game.pipes) {
         pipe.x -= PIPE_SPEED * delta;
       }
 
+      // нові труби
       if (game.pipes[0].x + game.pipes[0].width < 0) {
         game.pipes.shift();
         game.pipes.push(createPipe());
       }
 
+      // колізії + рахунок
       for (const pipe of game.pipes) {
         if (checkCollision(game.bird, pipe)) {
           endGame();
