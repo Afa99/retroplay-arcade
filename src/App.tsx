@@ -8,7 +8,9 @@ import { addScoreToLeaderboard } from "./leaderboard/storage";
 import {
   syncUserWithBackend,
   submitFlappyScoreToBackend,
+  type BackendProfile,
 } from "./api/backend";
+import { supabase } from "./lib/supabaseClient";
 
 type Screen =
   | "menu"
@@ -23,6 +25,14 @@ interface ProfileInfo {
   avatarInitial: string;
   avatarUrl: string | null;
 }
+
+interface XpLeaderboardRow {
+  xp: number;
+  username: string | null;
+  telegram_id: string;
+}
+
+// ===== TELEGRAM PROFILE =====
 
 function getProfileFromTelegram(): ProfileInfo {
   try {
@@ -68,26 +78,63 @@ function calcLevel(xp: number) {
 
 function App() {
   const profile = getProfileFromTelegram();
+  const XP_KEY = `retroplay_xp_${profile.id}`;
 
   const [screen, setScreen] = useState<Screen>("menu");
   const [xp, setXp] = useState(0);
   const [lastGain, setLastGain] = useState(0);
 
+  const [,setBackendProfile] = useState<BackendProfile | null>(
+    null
+  );
   const [userId, setUserId] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  // Telegram WebApp init
+  // GLOBAL XP LEADERBOARD
+  const [xpLeaders, setXpLeaders] = useState<XpLeaderboardRow[]>([]);
+  const [xpLbLoading, setXpLbLoading] = useState(false);
+  const [xpReloadTick, setXpReloadTick] = useState(0);
+
+  // Telegram WebApp ready + expand (фулл-екран)
   useEffect(() => {
     try {
       WebApp.ready();
       WebApp.expand();
       console.log("[App] Telegram WebApp ready");
-    } catch (e) {
-      console.log("[App] WebApp ready error or not in Telegram:", e);
+    } catch {
+      // звичайний браузер
     }
   }, []);
 
-  // 1) синхронізація з бекендом (Supabase)
+  // 1) XP кеш: читаємо з localStorage як fallback
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = window.localStorage.getItem(XP_KEY);
+        if (saved) {
+          const val = Number(saved);
+          if (!Number.isNaN(val) && val >= 0) {
+            setXp(val);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [XP_KEY]);
+
+  // 2) XP кеш: пишемо в localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(XP_KEY, String(xp));
+      } catch {
+        // ignore
+      }
+    }
+  }, [xp, XP_KEY]);
+
+  // 3) sync з бекендом: users + profiles
   useEffect(() => {
     let cancelled = false;
 
@@ -103,10 +150,11 @@ function App() {
         if (cancelled) return;
 
         setUserId(userId);
+        setBackendProfile(backend);
         setXp(backend.xp);
         console.log("[App] sync done, userId:", userId, "xp:", backend.xp);
       } catch (e) {
-        console.error("[App] Backend sync error:", e);
+        console.error("Backend sync error:", e);
       } finally {
         if (!cancelled) setSyncing(false);
       }
@@ -119,44 +167,89 @@ function App() {
     };
   }, [profile.id, profile.name]);
 
+  // 4) GLOBAL XP LEADERBOARD: profiles + users (TOP 10)
+  useEffect(() => {
+    if (!userId) return; // чекаємо, поки юзер зʼявиться в базі
+
+    let cancelled = false;
+
+    async function loadXpLeaderboard() {
+      setXpLbLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select(
+            `
+            xp,
+            user_id,
+            users!inner (
+              telegram_id,
+              username
+            )
+          `
+          )
+          .order("xp", { ascending: false })
+          .limit(10);
+
+        if (error) {
+          console.error("[App] XP leaderboard error:", error);
+          return;
+        }
+        if (!data || cancelled) return;
+
+        const mapped: XpLeaderboardRow[] = data.map((row: any) => ({
+          xp: Number(row.xp ?? 0),
+          username: row.users?.username ?? null,
+          telegram_id: row.users?.telegram_id ?? "",
+        }));
+
+        setXpLeaders(mapped);
+      } finally {
+        if (!cancelled) setXpLbLoading(false);
+      }
+    }
+
+    loadXpLeaderboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, xpReloadTick]);
+
   const { level, progress, nextLevelXp } = calcLevel(xp);
 
-  // 2) викликається, коли Flappy закінчує гру
+  // Коли Flappy закінчив гру
   const handleGameOver = async (sessionScore: number) => {
     console.log("[App] handleGameOver, score:", sessionScore);
-
     const gainedXp = sessionScore * 10;
 
-    // локальний лідерборд (тільки для клієнта)
+    // локальний лідерборд по грі (in-memory)
     addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
 
-    // оптимістичне +XP (щоб ти бачив приріст миттєво)
     if (gainedXp > 0) {
       setXp((prev) => prev + gainedXp);
       setLastGain(gainedXp);
     }
 
-    if (!userId || userId <= 0) {
-      console.warn("[App] no userId yet, skip backend update");
-      return;
-    }
+    if (userId) {
+      try {
+        const updated = await submitFlappyScoreToBackend({
+          userId,
+          score: sessionScore,
+          xpDelta: gainedXp,
+          gameKey: "flappy_coin",
+        });
 
-    try {
-      const updated = await submitFlappyScoreToBackend({
-        userId,
-        score: sessionScore,
-        xpDelta: gainedXp,
-        gameKey: "flappy_coin",
-      });
-
-      if (updated) {
-        console.log("[App] backend updated profile:", updated);
-        setXp(updated.xp); // вирівнюємо XP з тим, що в базі
-      } else {
-        console.warn("[App] submitFlappyScoreToBackend returned null");
+        if (updated) {
+          console.log("[App] backend updated profile:", updated);
+          setBackendProfile(updated);
+          setXp(updated.xp);
+          // перезавантажити глобальний XP-лідерборд після нової гри
+          setXpReloadTick((t) => t + 1);
+        }
+      } catch (e) {
+        console.error("submitFlappyScoreToBackend error:", e);
       }
-    } catch (e) {
-      console.error("[App] submitFlappyScoreToBackend error:", e);
     }
   };
 
@@ -196,7 +289,8 @@ function App() {
     return <VipTournamentsScreen onBack={() => setScreen("menu")} />;
   }
 
-  // ==== ГОЛОВНА (MENU) З XP / ПРОФІЛЕМ ====
+  // ===== ГОЛОВНА: ПРОФІЛЬ + GLOBAL XP LEADERBOARD + СПИСОК ІГОР =====
+
   return (
     <div
       style={{
@@ -349,7 +443,7 @@ function App() {
         </div>
       </div>
 
-      {/* GLOBAL XP PREVIEW */}
+      {/* GLOBAL XP LEADERBOARD */}
       <div
         style={{
           width: "100%",
@@ -364,8 +458,9 @@ function App() {
             color: "#ffcc33",
           }}
         >
-          🏆 Global XP Leaderboard (preview)
+          🏆 Global XP Leaderboard
         </div>
+
         <div
           style={{
             background: "rgba(0,0,0,0.55)",
@@ -373,62 +468,100 @@ function App() {
             border: "1px solid rgba(255,255,255,0.12)",
             padding: "8px 10px",
             fontSize: 12,
+            minHeight: 40,
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
+          {xpLbLoading && <div>Loading...</div>}
+
+          {!xpLbLoading && xpLeaders.length === 0 && (
+            <div style={{ opacity: 0.8 }}>
+              No players yet. Play a game to appear in the global ranking.
+            </div>
+          )}
+
+          {!xpLbLoading && xpLeaders.length > 0 && (
             <div
               style={{
                 display: "flex",
-                alignItems: "center",
-                gap: 8,
+                flexDirection: "column",
+                gap: 4,
               }}
             >
-              <div
-                style={{
-                  width: 22,
-                  textAlign: "right",
-                  fontWeight: 700,
-                  color: "#ffcc33",
-                }}
-              >
-                #1
-              </div>
-              <div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                  }}
-                >
-                  {profile.name}
-                </div>
-                <div
-                  style={{
-                    fontSize: 10,
-                    opacity: 0.75,
-                  }}
-                >
-                  Your current XP (stored in cloud)
-                </div>
-              </div>
+              {xpLeaders.map((row, index) => {
+                const isYou = row.telegram_id === profile.id;
+                return (
+                  <div
+                    key={row.telegram_id + index}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "4px 6px",
+                      borderRadius: 8,
+                      background: isYou
+                        ? "linear-gradient(135deg, rgba(91,255,156,0.18), rgba(0,0,0,0.7))"
+                        : "rgba(0,0,0,0.4)",
+                      border: isYou
+                        ? "1px solid rgba(91,255,156,0.7)"
+                        : "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 20,
+                          textAlign: "right",
+                          fontWeight: 700,
+                          color:
+                            index === 0
+                              ? "#ffcc33"
+                              : "rgba(255,255,255,0.9)",
+                        }}
+                      >
+                        #{index + 1}
+                      </div>
+                      <div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                          }}
+                        >
+                          {row.username || "Unknown"}
+                        </div>
+                        {isYou && (
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: "#5bff9c",
+                            }}
+                          >
+                            You
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        color: "#5bff9c",
+                        fontSize: 13,
+                      }}
+                    >
+                      {row.xp} XP
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: "#5bff9c",
-              }}
-            >
-              {xp} XP
-            </div>
-          </div>
+          )}
         </div>
+
         <div
           style={{
             fontSize: 10,
@@ -436,8 +569,7 @@ function App() {
             marginTop: 4,
           }}
         >
-          Now XP is stored in Supabase. Later this block will show real global
-          ranking between all players.
+          XP is stored in Supabase and shared between all Telegram players.
         </div>
       </div>
 
@@ -470,7 +602,7 @@ function App() {
         </div>
       </div>
 
-      {/* LIST */}
+      {/* GAMES LIST */}
       <div
         style={{
           width: "100%",

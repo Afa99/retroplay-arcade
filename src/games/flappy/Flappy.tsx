@@ -18,7 +18,7 @@ interface FlappyProps {
 // Було: GRAVITY = 0.42; JUMP_FORCE = -8.5
 const GRAVITY = 0.32;
 const JUMP_FORCE = -6; // слабший стрибок ~ -10%
-const PIPE_SPEED = 1.8;
+const PIPE_SPEED = 2;
 
 const BEST_KEY = "flappyBestScore";
 
