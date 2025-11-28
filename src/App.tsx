@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import WebApp from "@twa-dev/sdk";
 import { FlappyScreen } from "./screens/FlappyScreen";
+import { JumpScreen } from "./screens/JumpScreen";
 import { LeaderboardScreen } from "./screens/LeaderboardScreen";
 import { VipTournamentsScreen } from "./screens/VipTournamentsScreen";
 import { FlappyHubScreen } from "./screens/FlappyHubScreen";
+import { JumpHubScreen } from "./screens/JumpHubScreen";
 import { addScoreToLeaderboard } from "./leaderboard/storage";
 import {
   syncUserWithBackend,
@@ -17,6 +19,9 @@ type Screen =
   | "flappyHub"
   | "flappyPlay"
   | "flappyLeaderboard"
+  | "jumpHub"
+  | "jumpPlay"
+  | "jumpLeaderboard"
   | "vip";
 
 interface ProfileInfo {
@@ -84,9 +89,7 @@ function App() {
   const [xp, setXp] = useState(0);
   const [lastGain, setLastGain] = useState(0);
 
-  const [,setBackendProfile] = useState<BackendProfile | null>(
-    null
-  );
+  const [, setBackendProfile] = useState<BackendProfile | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -95,7 +98,7 @@ function App() {
   const [xpLbLoading, setXpLbLoading] = useState(false);
   const [xpReloadTick, setXpReloadTick] = useState(0);
 
-  // Telegram WebApp ready + expand (фулл-екран)
+  // Telegram WebApp ready + expand
   useEffect(() => {
     try {
       WebApp.ready();
@@ -106,7 +109,7 @@ function App() {
     }
   }, []);
 
-  // 1) XP кеш: читаємо з localStorage як fallback
+  // 1) XP кеш: читаємо з localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -218,13 +221,17 @@ function App() {
 
   const { level, progress, nextLevelXp } = calcLevel(xp);
 
-  // Коли Flappy закінчив гру
-  const handleGameOver = async (sessionScore: number) => {
-    console.log("[App] handleGameOver, score:", sessionScore);
+  // ===== FLAPPY: onGameOver =====
+  const handleFlappyGameOver = async (sessionScore: number) => {
+    console.log("[App] handleFlappyGameOver, score:", sessionScore);
     const gainedXp = sessionScore * 10;
 
-    // локальний лідерборд по грі (in-memory)
-    addScoreToLeaderboard(profile.id, profile.name, "flappy_coin", sessionScore);
+    addScoreToLeaderboard(
+      profile.id,
+      profile.name,
+      "flappy_coin",
+      sessionScore
+    );
 
     if (gainedXp > 0) {
       setXp((prev) => prev + gainedXp);
@@ -244,11 +251,48 @@ function App() {
           console.log("[App] backend updated profile:", updated);
           setBackendProfile(updated);
           setXp(updated.xp);
-          // перезавантажити глобальний XP-лідерборд після нової гри
           setXpReloadTick((t) => t + 1);
         }
       } catch (e) {
         console.error("submitFlappyScoreToBackend error:", e);
+      }
+    }
+  };
+
+  // ===== JUMP COIN: onGameOver =====
+  const handleJumpGameOver = async (sessionScore: number) => {
+    console.log("[App] handleJumpGameOver, score:", sessionScore);
+    const gainedXp = sessionScore * 10;
+
+    addScoreToLeaderboard(
+      profile.id,
+      profile.name,
+      "jump_coin",
+      sessionScore
+    );
+
+    if (gainedXp > 0) {
+      setXp((prev) => prev + gainedXp);
+      setLastGain(gainedXp);
+    }
+
+    if (userId) {
+      try {
+        const updated = await submitFlappyScoreToBackend({
+          userId,
+          score: sessionScore,
+          xpDelta: gainedXp,
+          gameKey: "jump_coin",
+        });
+
+        if (updated) {
+          console.log("[App] backend updated profile (jump):", updated);
+          setBackendProfile(updated);
+          setXp(updated.xp);
+          setXpReloadTick((t) => t + 1);
+        }
+      } catch (e) {
+        console.error("submitJumpScoreToBackend error:", e);
       }
     }
   };
@@ -259,7 +303,16 @@ function App() {
     return (
       <FlappyScreen
         onExitToMenu={() => setScreen("flappyHub")}
-        onGameOver={handleGameOver}
+        onGameOver={handleFlappyGameOver}
+      />
+    );
+  }
+
+  if (screen === "jumpPlay") {
+    return (
+      <JumpScreen
+        onExitToMenu={() => setScreen("jumpHub")}
+        onGameOver={handleJumpGameOver}
       />
     );
   }
@@ -275,6 +328,17 @@ function App() {
     );
   }
 
+  if (screen === "jumpLeaderboard") {
+    return (
+      <LeaderboardScreen
+        onBack={() => setScreen("jumpHub")}
+        gameKey="jump_coin"
+        gameTitle="Jump Coin"
+        currentTelegramId={profile.id}
+      />
+    );
+  }
+
   if (screen === "flappyHub") {
     return (
       <FlappyHubScreen
@@ -285,11 +349,21 @@ function App() {
     );
   }
 
+  if (screen === "jumpHub") {
+    return (
+      <JumpHubScreen
+        onBack={() => setScreen("menu")}
+        onPlay={() => setScreen("jumpPlay")}
+        onOpenLeaderboard={() => setScreen("jumpLeaderboard")}
+      />
+    );
+  }
+
   if (screen === "vip") {
     return <VipTournamentsScreen onBack={() => setScreen("menu")} />;
   }
 
-  // ===== ГОЛОВНА: ПРОФІЛЬ + GLOBAL XP LEADERBOARD + СПИСОК ІГОР =====
+  // ===== ГОЛОВНА =====
 
   return (
     <div
@@ -674,6 +748,74 @@ function App() {
               background: "rgba(0,0,0,0.6)",
               border: "1px solid rgba(91,255,156,0.6)",
               color: "#5bff9c",
+            }}
+          >
+            Open
+          </div>
+        </button>
+
+        {/* Jump Coin */}
+        <button
+          onClick={() => setScreen("jumpHub")}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background:
+              "linear-gradient(135deg, rgba(25,25,50,0.9), rgba(10,10,25,0.9))",
+            cursor: "pointer",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 10,
+                background:
+                  "radial-gradient(circle at 30% 30%, #fff5b0, #ffcc33)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 18,
+              }}
+            >
+              ⬆
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  marginBottom: 2,
+                  color: "#ffdd66",
+                }}
+              >
+                Jump Coin
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  opacity: 0.8,
+                  color: "#cdd9ff",
+                }}
+              >
+                Vertical arcade: jump on platforms, farm XP.
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              padding: "4px 8px",
+              borderRadius: 999,
+              background: "rgba(0,0,0,0.6)",
+              border: "1px solid rgba(200,200,255,0.6)",
+              color: "#f0f4ff",
             }}
           >
             Open
